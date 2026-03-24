@@ -17,13 +17,15 @@ from PyQt6.QtWidgets import (
     QStyle,
     QFileDialog,
     QMessageBox,
+    QDialog,
     QInputDialog,
     QScrollArea,
     QFrame,
     QMenuBar,
 )
 from PyQt6.QtWidgets import QBoxLayout
-from PyQt6.QtCore import Qt, QProcess, pyqtSignal, pyqtSlot, QTimer
+from PyQt6.QtCore import Qt, QProcess, pyqtSignal, pyqtSlot, QTimer, QEvent
+import subprocess
 import json
 from pathlib import Path
 from PyQt6.QtGui import QIcon, QFont, QAction, QPalette
@@ -60,20 +62,20 @@ class ScrcpyWrapper(QMainWindow):
         main_layout.setSpacing(12)
 
         # Splitter to separate controls from console output
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        self.splitter = QSplitter(Qt.Orientation.Vertical)
         # make the handle a little wider so it's easier to grab
-        splitter.setHandleWidth(10)
-        splitter.setOpaqueResize(True)
+        self.splitter.setHandleWidth(10)
+        self.splitter.setOpaqueResize(True)
         # Use palette colors to create a subtle, theme-aware handle with thin dividers
         pal = self.palette()
         light = pal.color(QPalette.ColorRole.Light).name()
         mid = pal.color(QPalette.ColorRole.Mid).name()
         window = pal.color(QPalette.ColorRole.Window).name()
-        splitter.setStyleSheet(
+        self.splitter.setStyleSheet(
             f"QSplitter::handle {{ background: {window}; }}"
             f"QSplitter::handle:vertical {{ border-top: 1px solid {light}; border-bottom: 1px solid {mid}; }}"
         )
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self.splitter)
 
         top_widget = QWidget()
         top_layout = QVBoxLayout(top_widget)
@@ -232,7 +234,7 @@ class ScrcpyWrapper(QMainWindow):
         # Small status label for network operations
         self.network_status = QLabel("")
         self.network_status.setFont(child_font)
-        self.network_status.setStyleSheet("color: #888; font-style: italic;")
+        # Rely on the application's palette for text color so it follows system theme changes
         device_layout.addWidget(self.network_status)
 
         # We'll place `device_group` into the responsive content area below
@@ -392,7 +394,7 @@ class ScrcpyWrapper(QMainWindow):
         action_widget.setLayout(action_layout)
         self.right_vlayout.addWidget(action_widget)
 
-        splitter.addWidget(top_widget)
+        self.splitter.addWidget(top_widget)
 
         # --- Console Output Log ---
         self.console_widget = QWidget()
@@ -400,7 +402,10 @@ class ScrcpyWrapper(QMainWindow):
         console_layout.setContentsMargins(0, 8, 0, 0)
 
         lbl_console = QLabel("Activity Log")
-        lbl_console.setFont(font)  # Bold
+        # Bold label
+        lbl_font = lbl_console.font()
+        lbl_font.setBold(True)
+        lbl_console.setFont(lbl_font)
         console_layout.addWidget(lbl_console)
 
         # Log filter controls (non-destructive view filtering)
@@ -434,8 +439,8 @@ class ScrcpyWrapper(QMainWindow):
         self._log_entries = []  # list of (level, text)
 
         # add console to splitter by default (will be moved on resize)
-        splitter.addWidget(self.console_widget)
-        splitter.setSizes([600, 250])  # Give more space to controls
+        self.splitter.addWidget(self.console_widget)
+        self.splitter.setSizes([600, 250])  # Give more space to controls
 
         self.scrcpy_process = None
 
@@ -451,6 +456,43 @@ class ScrcpyWrapper(QMainWindow):
         except Exception:
             # If loading fails, keep current defaults
             pass
+
+        # Show scrcpy repo link + installed version in the status bar (permanent, right-aligned)
+        try:
+            ver = None
+            proc = subprocess.run(["scrcpy", "--version"], capture_output=True, text=True, timeout=1)
+            if proc.returncode == 0 and proc.stdout:
+                ver = proc.stdout.strip().split()[-1]
+        except Exception:
+            ver = None
+
+        ver_text = f" - v{ver} installed" if ver else " - not found"
+        scrcpy_label = QLabel(f'<a href="https://github.com/Genymobile/scrcpy">scrcpy</a>{ver_text}')
+        scrcpy_label.setOpenExternalLinks(True)
+        self.statusBar().addPermanentWidget(scrcpy_label)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        # Recompute theme-aware styles when the application palette or style changes
+        if event.type() in (
+            QEvent.Type.ApplicationPaletteChange,
+            QEvent.Type.PaletteChange,
+            QEvent.Type.StyleChange,
+        ):
+            pal = self.palette()
+            light = pal.color(QPalette.ColorRole.Light).name()
+            mid = pal.color(QPalette.ColorRole.Mid).name()
+            window = pal.color(QPalette.ColorRole.Window).name()
+            # Update splitter handle styling to match the new palette
+            try:
+                self.splitter.setStyleSheet(
+                    f"QSplitter::handle {{ background: {window}; }}"
+                    f"QSplitter::handle:vertical {{ border-top: 1px solid {light}; border-bottom: 1px solid {mid}; }}"
+                )
+            except Exception:
+                pass
+
+        # (Console is created in init_ui; changeEvent should only update palette-related styling)
 
     def resizeEvent(self, event):
         # Responsive layout: switch content layout direction based on width
@@ -1263,11 +1305,23 @@ class ScrcpyWrapper(QMainWindow):
         help_menu.addAction(about_action)
 
     def show_about(self):
-        QMessageBox.information(
-            self,
-            "About",
-            "Scrcpy-PyQt6\n\nLightweight GUI for scrcpy/adb.\n\nRepo: https://github.com/JosephDoesLinux/scrcpy-pyqt6",
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About")
+        layout = QVBoxLayout(dlg)
+        about_text = (
+            "<h3>Scrcpy-PyQt6</h3>"
+            "<p>Lightweight GUI wrapper for <a href=\"https://github.com/Genymobile/scrcpy\">scrcpy</a> and adb.</p>"
+            "<p>Wrapper made by <a href=\"https://github.com/JosephDoesLinux\">JosephDoesLinux</a> on GitHub.</p>"
+            "<p>Repository: <a href=\"https://github.com/JosephDoesLinux/scrcpy-pyqt6\">scrcpy-pyqt6</a></p>"
         )
+        lbl = QLabel(about_text)
+        lbl.setOpenExternalLinks(True)
+        lbl.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(lbl)
+        ok = QPushButton("OK")
+        ok.clicked.connect(dlg.accept)
+        layout.addWidget(ok, alignment=Qt.AlignmentFlag.AlignRight)
+        dlg.exec()
 
     def open_preferences(self):
         # Preferences page removed — follow system theme by default.

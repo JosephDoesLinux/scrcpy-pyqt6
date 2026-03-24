@@ -31,7 +31,6 @@ Dependencies hints
 - Debian/Ubuntu: `sudo apt install adb scrcpy avahi-utils python3-pyqt6` (or use `python3-pyside6` if you prefer LGPL)
 - Fedora: `sudo dnf install android-tools scrcpy avahi python3-qt6` (package names vary)
 - Arch: `sudo pacman -S android-tools scrcpy avahi python-pyqt6`
-- macOS (Homebrew): `brew install android-platform-tools scrcpy` (no system avahi required for local USB)
 
 Development
 - Create a virtualenv and install Python deps:
