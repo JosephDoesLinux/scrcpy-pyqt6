@@ -1,0 +1,18 @@
+Scrcpy-PyQt6 — NOTICE
+
+This project (`Scrcpy-PyQt6`) is distributed under the MIT License (see `LICENSE`).
+
+This repository is a lightweight wrapper around several upstream free and open
+source projects; it intentionally bundles no third-party binaries. It depends on
+the following (not exhaustive) components which you should consult for their
+own licensing and attribution requirements:
+
+- `scrcpy` — https://github.com/Genymobile/scrcpy
+- `adb` / Android platform-tools — AOSP project
+- `avahi` / mDNS utilities or `python-zeroconf` for network discovery
+- Python GUI bindings used during development: `PyQt6` (GPL) — note the
+  licensing implications if you distribute a PyQt6-based bundle; consider
+  using `PySide6` (LGPL) for permissive distribution.
+
+A machine-readable list of installed Python packages and licenses is provided
+in `THIRD_PARTY_LICENSES.txt`.

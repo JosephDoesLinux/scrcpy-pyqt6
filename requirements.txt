@@ -1,0 +1,6 @@
+PyQt6>=6.6
+zeroconf>=0.120
+
+# Optional developer tools (not required at runtime):
+# black
+# pip-licenses

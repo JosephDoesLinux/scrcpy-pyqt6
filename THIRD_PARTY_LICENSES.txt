@@ -1,0 +1,941 @@
+Brlapi
+0.8.7
+LGPL 2.1
+
+Brotli
+1.2.0
+MIT
+
+CairoSVG
+2.7.1
+GNU Lesser General Public License v3 or later (LGPLv3+)
+
+Jinja2
+3.1.6
+BSD License
+
+Konsave
+2.2.0
+GNU General Public License v3 or later (GPLv3+)
+
+MarkupSafe
+3.0.2
+BSD License
+
+PyAudio
+0.2.13
+MIT License
+
+PyGObject
+3.54.5
+LGPL-2.1-or-later
+
+PyNaCl
+1.5.0
+Apache License 2.0
+
+PyOgg
+0.6.14a1
+BSD License
+
+PyQt5
+5.15.11
+GPL v3
+
+PyQt5-Qt5
+5.15.18
+LGPL v3
+
+PyQt5_sip
+12.17.1
+BSD-2-Clause
+
+PyQt6
+6.10.2
+GPL-3.0-only
+
+PyQt6
+6.10.2
+GPL-3.0-only
+
+PyQt6-Qt6
+6.10.2
+LGPL v3
+
+PyQt6_sip
+13.10.2
+BSD-2-Clause
+
+PyQt6_sip
+13.11.1
+BSD-2-Clause
+
+PySocks
+1.7.1
+BSD
+
+PyYAML
+6.0.2
+MIT License
+
+Pygments
+2.19.2
+BSD License
+
+RapidFuzz
+3.12.2
+MIT
+
+SQLAlchemy
+2.0.44
+MIT
+
+SecretStorage
+3.3.3
+BSD License
+
+Unidecode
+1.4.0
+GNU General Public License v2 or later (GPLv2+)
+
+aigpy
+2022.7.8.1
+MIT Licence
+
+aiodns
+3.6.1
+MIT License
+
+aiohappyeyeballs
+2.6.1
+Python Software Foundation License
+
+aiohttp
+3.13.3
+Apache-2.0 AND MIT
+
+aiosignal
+1.4.0
+Apache Software License
+
+altgraph
+0.17.5
+MIT License
+
+anyio
+4.12.1
+MIT
+
+argcomplete
+3.6.3
+Apache Software License
+
+attrs
+25.4.0
+MIT
+
+babel
+2.17.0
+BSD License
+
+bcc
+0.35.0
+UNKNOWN
+
+bcrypt
+4.3.0
+Apache Software License
+
+beautifulsoup4
+4.14.3
+MIT License
+
+blivet
+3.12.1
+GNU General Public License v2 or later (GPLv2+)
+
+blivet-gui
+2.6.0
+UNKNOWN
+
+boto3
+1.42.50
+Apache-2.0
+
+botocore
+1.42.50
+Apache-2.0
+
+cairocffi
+1.7.1
+BSD License
+
+certifi
+2025.7.9
+Mozilla Public License 2.0 (MPL 2.0)
+
+cffi
+2.0.0
+MIT
+
+charset-normalizer
+3.4.3
+MIT
+
+click
+8.1.7
+BSD License
+
+click-plugins
+1.1.1.2
+BSD License
+
+cockpit
+356
+UNKNOWN
+
+colorama
+0.4.6
+BSD License
+
+crypt_r
+3.13.1
+Python Software Foundation License
+
+cryptography
+45.0.4
+Apache-2.0 OR BSD-3-Clause
+
+cssselect2
+0.8.0
+BSD License
+
+cupshelpers
+1.0
+UNKNOWN
+
+dasbus
+1.7
+GNU Lesser General Public License v2 or later (LGPLv2+)
+
+dbus-fast
+2.44.3
+MIT License
+
+dbus-python
+1.4.0
+MIT License
+
+dbus_next
+0.2.3
+MIT
+
+defusedxml
+0.7.1
+Python Software Foundation License
+
+defusedxml
+0.7.1
+Python Software Foundation License
+
+distlib
+0.4.0
+Python Software Foundation License
+
+distro
+1.9.0
+Apache Software License
+
+dnf
+4.24.0
+UNKNOWN
+
+evdev
+1.9.3
+BSD-3-Clause
+
+fedora-third-party
+0.10
+MIT
+
+ffmpy
+1.0.0
+MIT
+
+fido2
+2.0.0
+Apache Software License; BSD License; Mozilla Public License 2.0 (MPL 2.0)
+
+file-magic
+0.4.0
+BSD License
+
+filelock
+3.15.4
+Unlicense
+
+frozenlist
+1.8.0
+Apache-2.0
+
+fsspec
+2026.1.0
+BSD-3-Clause
+
+gbinder-python
+1.3.0
+GPL3
+
+greenlet
+3.2.4
+MIT AND Python-2.0
+
+h11
+0.16.0
+MIT License
+
+httpcore
+1.0.9
+BSD-3-Clause
+
+httpx
+0.28.1
+BSD-3-Clause
+
+huggingface_hub
+0.30.2
+Apache Software License
+
+humanize
+4.13.0
+MIT
+
+idna
+3.10
+BSD License
+
+ifaddr
+0.2.0
+MIT License
+
+ifaddr
+0.2.0
+MIT License
+
+importlib_metadata
+8.7.0
+Apache Software License
+
+iniconfig
+2.3.0
+MIT
+
+initial-setup
+0.3.101
+GNU General Public License v2 or later (GPLv2+)
+
+iso639
+0.1.4
+MIT
+
+isodate
+0.7.2
+BSD License
+
+jaraco.classes
+3.4.0
+MIT License
+
+jaraco.context
+6.0.1
+MIT License
+
+jaraco.functools
+4.1.0
+MIT License
+
+jeepney
+0.9.0
+MIT
+
+jmespath
+1.0.1
+MIT License
+
+jsonschema
+4.23.0
+MIT License
+
+jsonschema-specifications
+2024.10.1
+MIT License
+
+kde-material-you-colors
+2.0.2
+GNU General Public License v3 (GPLv3)
+
+keyring
+25.7.0
+MIT
+
+langtable
+0.0.69
+GPL-3.0-or-later
+
+libcomps
+0.1.23
+GNU General Public License v2 or later (GPLv2+)
+
+libdnf
+0.75.0
+UNKNOWN
+
+libdnf5
+5.2.18.0
+UNKNOWN
+
+librespot
+0.0.10
+Apache Software License
+
+libvirt-python
+11.6.0
+LGPL-v2.0-or-later
+
+louis
+3.33.0
+GNU Library or Lesser General Public License (LGPL)
+
+lutris
+0.5.20
+GNU General Public License v3 or later (GPLv3+)
+
+lxml
+6.0.1
+BSD License
+
+markdown-it-py
+4.0.0
+MIT License
+
+materialyoucolor
+2.0.9
+UNKNOWN
+
+mdurl
+0.1.2
+MIT License
+
+moddb
+0.12.0
+UNKNOWN
+
+more-itertools
+10.5.0
+MIT License
+
+mpegdash
+0.4.0
+MIT License
+
+multidict
+6.6.4
+Apache License 2.0
+
+music-tag
+0.4.3
+MIT License
+
+mutagen
+1.47.0
+GNU General Public License v2 or later (GPLv2+)
+
+netaddr
+1.3.0
+BSD License
+
+nftables
+0.1
+GNU General Public License v2 (GPLv2)
+
+numpy
+2.3.5
+BSD License
+
+olefile
+0.47
+BSD License
+
+packaging
+25.0
+Apache Software License; BSD License
+
+perf
+0.1
+GPLv2
+
+pexpect
+4.9.0
+ISC License (ISCL)
+
+pid
+3.0.4
+Apache Software License
+
+pillow
+11.3.0
+MIT-CMU
+
+pip
+25.1.1
+MIT License
+
+pip-licenses
+5.5.1
+MIT
+
+pipx
+1.8.0
+MIT
+
+platformdirs
+4.2.2
+MIT
+
+pluggy
+1.6.0
+MIT License
+
+ply
+3.11
+BSD
+
+prettytable
+3.17.0
+BSD-3-Clause
+
+productmd
+1.50
+LGPLv2.1
+
+progressbar2
+4.5.0
+BSD License
+
+propcache
+0.4.1
+Apache Software License
+
+protobuf
+3.19.6
+3-Clause BSD License
+
+protobuf
+3.20.1
+BSD-3-Clause
+
+proton-core
+0.7.3
+GNU General Public License v3 (GPLv3)
+
+proton-keyring-linux
+0.2.1
+GNU General Public License v3 (GPLv3)
+
+proton-vpn-api-core
+4.14.3
+GNU General Public License v3 (GPLv3)
+
+proton-vpn-daemon
+0.13.5
+GNU General Public License v3 (GPLv3)
+
+proton-vpn-gtk-app
+4.14.1
+GNU General Public License v3 (GPLv3)
+
+protontricks
+1.13.1
+GNU General Public License v3 (GPLv3)
+
+psutil
+7.0.0
+BSD License
+
+ptyprocess
+0.7.0
+ISC License (ISCL)
+
+pwinput
+1.0.3
+MIT License
+
+pwquality
+1.4.5
+BSD or GPLv2+
+
+pyOpenSSL
+25.1.0
+Apache Software License
+
+pyaes
+1.6.1
+MIT License
+
+pycairo
+1.28.0
+LGPL-2.1-only OR MPL-1.1
+
+pycares
+4.10.0
+MIT License
+
+pyclip
+0.7.0
+Apache Software License
+
+pycparser
+2.22
+BSD License
+
+pycryptodome
+3.23.0
+BSD License; Public Domain
+
+pycryptodomex
+3.23.0
+BSD License; Public Domain
+
+pycups
+2.0.4
+GNU General Public License (GPL)
+
+pydub
+0.25.1
+MIT License
+
+pyenchant
+3.2.2
+GNU Library or Lesser General Public License (LGPL)
+
+pygdbmi
+0.11.0.0
+MIT License
+
+pygit2
+1.18.2
+GPLv2 with linking exception
+
+pyinotify
+0.9.6
+MIT License
+
+pyinstaller
+6.19.0
+GNU General Public License v2 (GPLv2)
+
+pyinstaller-hooks-contrib
+2026.3
+Apache Software License; GNU General Public License v2 (GPLv2)
+
+pykickstart
+3.66
+GNU General Public License (GPL)
+
+pyparsing
+3.1.2
+MIT License
+
+pyparted
+3.13.0
+GPLv2+
+
+pypresence
+4.3.0
+MIT License
+
+pystray
+0.17.3
+GNU Lesser General Public License v3 (LGPLv3)
+
+pytest
+8.4.2
+MIT License
+
+pytest-mock
+3.15.1
+MIT License
+
+python-augeas
+1.2.0
+UNKNOWN
+
+python-dateutil
+2.9.0.post0
+Apache Software License; BSD License
+
+python-gettext
+4.0
+BSD License
+
+python-gnupg
+0.5.4
+BSD License
+
+python-linux-procfs
+0.7.3
+GPLv2
+
+python-manatools
+0.0.4
+LGPLv2+
+
+python-meh
+0.52
+GPL-2.0+
+
+python-utils
+3.9.1
+BSD License
+
+python-xlib
+0.33
+GNU Lesser General Public License v2 or later (LGPLv2+)
+
+pytube
+15.0.0
+The Unlicense (Unlicense)
+
+pyudev
+0.24.3
+GNU Library or Lesser General Public License (LGPL)
+
+pywal16
+3.8.6
+MIT License
+
+pyxdg
+0.28
+GNU Lesser General Public License v2 (LGPLv2)
+
+pyynl
+0.0.1
+UNKNOWN
+
+qt-material
+2.17
+BSD License
+
+ratelimit
+2.2.1
+MIT License
+
+redis
+7.1.0
+MIT
+
+referencing
+0.36.2
+MIT
+
+regex
+2025.10.23
+Apache-2.0 AND CNRI-Python
+
+requests
+2.32.5
+Apache Software License
+
+requests-file
+2.0.0
+Apache Software License
+
+requests-ftp
+0.3.1
+Apache Software License
+
+rich
+14.3.2
+MIT License
+
+rpds-py
+0.27.0
+MIT
+
+rpm
+6.0.1
+GNU General Public License v2
+
+rpmautospec
+0.8.3
+MIT AND GPL-2.0-only WITH GCC-exception-2.0 AND (MIT OR GPL-2.0-or-later WITH GCC-exception-2.0)
+
+rpmautospec-core
+0.1.5
+MIT License
+
+s3transfer
+0.16.0
+Apache Software License
+
+selinux
+3.9
+UNKNOWN
+
+sentry-sdk
+2.35.0
+BSD License
+
+sepolicy
+3.9
+UNKNOWN
+
+setools
+4.6.0
+GNU General Public License v2 or later (GPLv2+); GNU Lesser General Public License v2 or later (LGPLv2+)
+
+setroubleshoot
+3.3.36
+GPLv3+
+
+setuptools
+78.1.1
+UNKNOWN
+
+shtab
+1.7.2
+Apache Software License
+
+simpleaudio
+1.0.4
+MIT License
+
+simpleline
+1.9.0
+GNU Lesser General Public License v3 or later (LGPLv3+)
+
+six
+1.17.0
+MIT License
+
+sniffio
+1.3.1
+Apache Software License; MIT License
+
+sos
+4.10.2
+GPLv2+
+
+soupsieve
+2.8
+MIT
+
+spotify_to_tidal
+1.0.4
+UNKNOWN
+
+spotify_to_tidal
+1.0.4
+UNKNOWN
+
+spotipy
+2.24.0
+MIT
+
+systemd-python
+235
+GNU Lesser General Public License v2 or later (LGPLv2+)
+
+tabulate
+0.9.0
+MIT License
+
+tidal-dl
+2022.10.31.1
+Apache2
+
+tidalapi
+0.8.8
+GNU Lesser General Public License v3 (LGPLv3); GNU Lesser General Public License v3 or later (LGPLv3+)
+
+tinycss2
+1.5.1
+BSD License
+
+tqdm
+4.67.2
+MPL-2.0 AND MIT
+
+tuxpanel-installer
+1.0.0
+GPL-3.0-or-later
+
+tuxpanel-installer
+1.0.0
+GPL-3.0-or-later
+
+typing_extensions
+4.15.0
+PSF-2.0
+
+urllib3
+2.6.3
+MIT
+
+userpath
+1.9.2
+MIT
+
+vdf
+3.4
+MIT License
+
+virtualenv
+20.35.4
+MIT
+
+wcwidth
+0.2.14
+MIT License
+
+webencodings
+0.5.1
+BSD License
+
+websocket-client
+1.9.0
+Apache Software License
+
+wheel
+0.45.1
+MIT License
+
+xkbregistry
+0.3
+MIT License
+
+yarl
+1.22.0
+Apache Software License
+
+yt-dlp
+2026.1.31
+Unlicense
+
+ytmusicapi
+1.11.5
+MIT License
+
+zeroconf
+0.118.0
+GNU Lesser General Public License v2 (LGPLv2); Other/Proprietary License
+
+zeroconf
+0.148.0
+LGPL-2.1-or-later
+
+zipp
+3.23.0
+MIT
+
+
