@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtWidgets import QBoxLayout
 from PyQt6.QtCore import Qt, QProcess, pyqtSignal, pyqtSlot, QTimer, QEvent
 import subprocess
+import re
 import json
 from pathlib import Path
 from PyQt6.QtGui import QIcon, QFont, QAction, QPalette
@@ -462,7 +463,9 @@ class ScrcpyWrapper(QMainWindow):
             ver = None
             proc = subprocess.run(["scrcpy", "--version"], capture_output=True, text=True, timeout=1)
             if proc.returncode == 0 and proc.stdout:
-                ver = proc.stdout.strip().split()[-1]
+                m = re.search(r"\d+\.\d+(?:\.\d+)?", proc.stdout)
+                if m:
+                    ver = m.group(0)
         except Exception:
             ver = None
 
