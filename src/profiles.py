@@ -53,6 +53,13 @@ DEFAULT_SETTINGS = {
     "show_error": True,
 }
 
+# UI/startup settings
+DEFAULT_SETTINGS.update({
+    "start_in_tray": False,
+    "start_minimized": False,
+    "autostart_enabled": False,
+})
+
 
 def _ensure_dir():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
