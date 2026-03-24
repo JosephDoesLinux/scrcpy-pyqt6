@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QFrame,
     QMenuBar,
+    QApplication,
 )
 from PyQt6.QtWidgets import QBoxLayout
 from PyQt6.QtCore import Qt, QProcess, pyqtSignal, pyqtSlot, QTimer, QEvent
@@ -30,6 +31,8 @@ import re
 import json
 from pathlib import Path
 from PyQt6.QtGui import QIcon, QFont, QAction, QPalette
+from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
+import sys
 from adb import (
     get_devices,
     connect_device,
@@ -44,15 +47,49 @@ from profiles import (
     load_settings,
     save_settings,
 )
+from tray import TrayManager
 
 
 class ScrcpyWrapper(QMainWindow):
-    def __init__(self):
+    def __init__(self, start_in_tray: bool = False, start_minimized: bool = False, verbose_level: int = 0):
         super().__init__()
         self.setWindowTitle("Scrcpy-PyQt6")
         self.resize(850, 650)
+        self._explicit_quit = False
+        # runtime flags
+        self._start_in_tray_flag = bool(start_in_tray)
+        self._start_minimized_flag = bool(start_minimized)
+        self.active_profile = None
+        # verbosity: 0 = quiet (console suppressed), 1 = info, 2+ = debug
+        try:
+            self._verbose_level = int(verbose_level or 0)
+        except Exception:
+            self._verbose_level = 0
+
         self.init_ui()
         self.refresh_devices()
+
+        # Load settings and apply startup behavior
+        try:
+            settings = load_settings()
+        except Exception:
+            settings = {}
+
+        start_in_tray = self._start_in_tray_flag or bool(settings.get("start_in_tray", False))
+        start_minimized = self._start_minimized_flag or bool(settings.get("start_minimized", False))
+
+        if start_in_tray:
+            try:
+                self.init_tray()
+            except Exception:
+                pass
+
+        # If requested, hide the main window after creating tray
+        if start_in_tray or start_minimized:
+            try:
+                self.hide()
+            except Exception:
+                pass
 
     def init_ui(self):
         main_widget = QWidget()
@@ -293,7 +330,12 @@ class ScrcpyWrapper(QMainWindow):
         self.profile_combo.setFont(child_font)
         self.profile_combo.addItems(list(self.profiles.keys()))
         self.profile_combo.setMinimumHeight(30)
-        self.profile_combo.currentTextChanged.connect(self.apply_profile)
+        self.profile_combo.currentTextChanged.connect(self._on_profile_combo_changed)
+        # initialize active_profile to the combo's current selection so tray can reflect it
+        try:
+            self.active_profile = self.profile_combo.currentText()
+        except Exception:
+            self.active_profile = None
 
         self.btn_save_profile = QPushButton(" Save")
         self.btn_save_profile.setFont(child_font)
@@ -758,17 +800,45 @@ class ScrcpyWrapper(QMainWindow):
         if filepath:
             self.opt_record_file.setText(filepath)
 
-    def log(self, text: str):
+    def log(self, text: str, level: int | None = None):
         # Non-destructive logging: classify and store entries, then refresh view
         txt = str(text)
-        ltxt = txt.lower()
-        level = "info"
-        if "error" in ltxt or "failed" in ltxt or "exception" in ltxt:
-            level = "error"
-        elif "warn" in ltxt or "warning" in ltxt:
-            level = "warn"
+        # If caller provided numeric level, map it to named level
+        if level is not None:
+            try:
+                lv = int(level)
+            except Exception:
+                lv = 0
+            if lv >= 2:
+                named = "error"
+            elif lv == 1:
+                named = "warn"
+            else:
+                named = "info"
+        else:
+            ltxt = txt.lower()
+            named = "info"
+            if "error" in ltxt or "failed" in ltxt or "exception" in ltxt:
+                named = "error"
+            elif "warn" in ltxt or "warning" in ltxt:
+                named = "warn"
 
-        self._log_entries.append((level, txt))
+        # store entry
+        self._log_entries.append((named, txt))
+        # echo to terminal when verbosity enabled
+        try:
+            if getattr(self, "_verbose_level", 0) >= 1:
+                import datetime
+
+                ts = datetime.datetime.now().isoformat(timespec="seconds")
+                out = f"[{ts}] [{named.upper()}] {txt}"
+                # debug verbosity prints to stderr for visibility
+                if getattr(self, "_verbose_level", 0) >= 2 or named == "error":
+                    print(out, file=sys.stderr)
+                else:
+                    print(out)
+        except Exception:
+            pass
         # Keep a bounded history to avoid runaway memory usage
         if len(self._log_entries) > 5000:
             self._log_entries.pop(0)
@@ -793,6 +863,15 @@ class ScrcpyWrapper(QMainWindow):
                     f"{d['serial']} [{d['state']}] - {d['model']}", userData=d["serial"]
                 )
             self.log(f"Found {len(devices)} device(s).")
+        # Update tray devices menu indicators
+        try:
+            if hasattr(self, "tray_manager") and getattr(self, "tray_manager"):
+                try:
+                    self.tray_manager.rebuild_devices_menu()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     @pyqtSlot()
     def scan_mdns(self):
@@ -1214,13 +1293,7 @@ class ScrcpyWrapper(QMainWindow):
             and not self.opt_v4l2_sink.text().strip()
         ):
             self.opt_v4l2_sink.setText("/dev/video0")
-
-    @pyqtSlot(str)
-    def apply_profile(self, name):
-        if not name or name not in self.profiles:
-            return
-        self.set_ui_state(self.profiles[name])
-        self.log(f"Applied profile '{name}'.")
+    # Note: `apply_profile` implemented later; earlier debug-version removed.
 
     @pyqtSlot()
     def save_profile(self):
@@ -1237,6 +1310,27 @@ class ScrcpyWrapper(QMainWindow):
                 self.profile_combo.addItem(name)
             self.profile_combo.setCurrentText(name)
             self.log(f"Saved profile '{name}'.")
+        # Update tray menu indicators
+        try:
+            if hasattr(self, "tray_manager") and getattr(self, "tray_manager"):
+                try:
+                    self.tray_manager.rebuild_profiles_menu()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _on_profile_combo_changed(self, text: str):
+        try:
+            # keep an internal active_profile value in sync with UI changes
+            self.active_profile = text
+            if hasattr(self, "tray_manager") and getattr(self, "tray_manager"):
+                try:
+                    self.tray_manager.rebuild_profiles_menu()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     @pyqtSlot()
     def delete_profile(self):
@@ -1268,6 +1362,14 @@ class ScrcpyWrapper(QMainWindow):
                 if idx != -1:
                     self.profile_combo.removeItem(idx)
                 self.log(f"Deleted profile '{name}'.")
+                try:
+                    if hasattr(self, "tray_manager") and getattr(self, "tray_manager"):
+                        try:
+                            self.tray_manager.rebuild_profiles_menu()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
     def on_filter_changed(self):
         # Refresh console view and persist filter settings
@@ -1286,6 +1388,8 @@ class ScrcpyWrapper(QMainWindow):
                     "show_info": bool(self.chk_show_info.isChecked()),
                     "show_warn": bool(self.chk_show_warn.isChecked()),
                     "show_error": bool(self.chk_show_error.isChecked()),
+                    "start_in_tray": bool(getattr(self, "action_start_in_tray", False) and self.action_start_in_tray.isChecked()),
+                    "autostart_enabled": bool(getattr(self, "action_autostart", False) and self.action_autostart.isChecked()),
                 }
             )
             save_settings(settings)
@@ -1296,10 +1400,27 @@ class ScrcpyWrapper(QMainWindow):
     def init_menu(self):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("&File")
+        # Minimize-to-tray action (one-shot): immediately hides the window
+        self.action_start_in_tray = QAction("Minimize to Tray", self)
+        self.action_start_in_tray.setCheckable(False)
+        self.action_start_in_tray.triggered.connect(self._perform_minimize_to_tray)
+        file_menu.addAction(self.action_start_in_tray)
+
+        # Autostart at login toggle
+        self.action_autostart = QAction("Start in Tray at Login", self)
+        self.action_autostart.setCheckable(True)
+        try:
+            settings = load_settings()
+            self.action_autostart.setChecked(bool(settings.get("autostart_enabled", False)))
+        except Exception:
+            pass
+        self.action_autostart.triggered.connect(self._on_autostart_toggled)
+        file_menu.addAction(self.action_autostart)
+
         file_menu.addSeparator()
         exit_action = QAction("Quit", self)
         exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(self.close)
+        exit_action.triggered.connect(self._quit_from_menu)
         file_menu.addAction(exit_action)
 
         help_menu = menubar.addMenu("&Help")
@@ -1325,6 +1446,185 @@ class ScrcpyWrapper(QMainWindow):
         ok.clicked.connect(dlg.accept)
         layout.addWidget(ok, alignment=Qt.AlignmentFlag.AlignRight)
         dlg.exec()
+
+    def _on_minimize_to_tray_toggled(self, checked: bool):
+        try:
+            # Ensure tray exists when enabling minimize-to-tray
+            if checked:
+                try:
+                    if not hasattr(self, "tray_manager") or getattr(self, "tray_manager") is None:
+                        self.init_tray()
+                    else:
+                        # ensure tray is initialized
+                        try:
+                            if getattr(self, "tray_manager") and getattr(self, "tray_manager").tray is None:
+                                self.tray_manager.init_tray()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            # Keep the tray manager's checkbox in sync if present
+            try:
+                if hasattr(self, "tray_manager") and getattr(self, "tray_manager") is not None:
+                    tm = self.tray_manager
+                    if hasattr(tm, "tray_action_start_in_tray") and tm.tray_action_start_in_tray is not None:
+                        try:
+                            tm.tray_action_start_in_tray.setChecked(bool(checked))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        finally:
+            # persist the new state
+            try:
+                self.save_settings_event()
+            except Exception:
+                pass
+
+    def _perform_minimize_to_tray(self):
+        try:
+            if not hasattr(self, "tray_manager") or getattr(self, "tray_manager") is None:
+                try:
+                    self.init_tray()
+                except Exception:
+                    pass
+            try:
+                self.hide()
+                if hasattr(self, "tray_manager") and getattr(self.tray_manager, "tray", None):
+                    try:
+                        self.tray_manager.tray.showMessage("Scrcpy-PyQt6", "Minimized to system tray", msecs=2000)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _quit_from_menu(self):
+        try:
+            self._explicit_quit = True
+        except Exception:
+            pass
+        try:
+            self.close()
+        except Exception:
+            try:
+                super().close()
+            except Exception:
+                pass
+
+
+    def _on_autostart_toggled(self, checked: bool):
+        try:
+            if checked:
+                self._create_autostart_file()
+            else:
+                self._remove_autostart_file()
+        finally:
+            # persist setting
+            try:
+                self.save_settings_event()
+            except Exception:
+                pass
+
+    def _autostart_desktop_path(self) -> str:
+        return str(Path.home() / ".config" / "autostart" / "scrcpy-pyqt6.desktop")
+
+    def _create_autostart_file(self):
+        path = Path(self._autostart_desktop_path())
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            exec_path = str(Path.home() / ".local" / "bin" / "scrcpy-pyqt6")
+            contents = (
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                "Name=Scrcpy-PyQt6\n"
+                "Comment=Start Scrcpy-PyQt6 at login (start in tray)\n"
+                f"Exec={exec_path} --tray\n"
+                "Icon=smartphone\n"
+                "Terminal=false\n"
+                "X-GNOME-Autostart-enabled=true\n"
+                "Categories=Utility;System;\n"
+            )
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(contents)
+        except Exception as e:
+            self.log(f"Failed to create autostart file: {e}")
+
+    def _remove_autostart_file(self):
+        path = Path(self._autostart_desktop_path())
+        try:
+            if path.exists():
+                path.unlink()
+        except Exception as e:
+            self.log(f"Failed to remove autostart file: {e}")
+
+    def init_tray(self):
+        try:
+            self.tray_manager = TrayManager(self)
+            self.tray_manager.init_tray()
+        except Exception as e:
+            self.log(f"Failed to initialize tray: {e}")
+
+    def rebuild_profiles_menu(self):
+        try:
+            if not hasattr(self, "profiles_menu"):
+                return
+            self.profiles_menu.clear()
+            for name in list(self.profiles.keys()):
+                a = QAction(name, self)
+                a.triggered.connect(lambda checked, n=name: self.apply_profile(n))
+                self.profiles_menu.addAction(a)
+        except Exception:
+            pass
+
+    def rebuild_devices_menu(self):
+        try:
+            if not hasattr(self, "devices_menu"):
+                return
+            self.devices_menu.clear()
+            # use device combo model to list available devices
+            try:
+                items = [self.device_combo.itemText(i) for i in range(self.device_combo.count())]
+            except Exception:
+                items = []
+            for it in items:
+                a = QAction(it, self)
+                a.triggered.connect(lambda checked, txt=it: self._select_device_from_tray(txt))
+                self.devices_menu.addAction(a)
+        except Exception:
+            pass
+
+    def _select_device_from_tray(self, label: str):
+        try:
+            idx = self.device_combo.findText(label)
+            if idx != -1:
+                self.device_combo.setCurrentIndex(idx)
+        except Exception:
+            pass
+
+    def _tray_show(self):
+        try:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+        except Exception:
+            pass
+
+    def _tray_hide(self):
+        try:
+            self.hide()
+        except Exception:
+            pass
+
+    def _tray_quit(self):
+        try:
+            self.tray.hide()
+        except Exception:
+            pass
+        self.close()
 
     def open_preferences(self):
         # Preferences page removed — follow system theme by default.
@@ -1362,7 +1662,42 @@ class ScrcpyWrapper(QMainWindow):
             self.log(f"Created new profile '{name}'.")
 
     def closeEvent(self, event):
-        # Persist settings on close
+        # Distinguish explicit Quit (from menu) vs window close: if explicit quit, close; otherwise minimize to tray
+        try:
+            if getattr(self, "_explicit_quit", False):
+                try:
+                    self.save_settings_event()
+                except Exception:
+                    pass
+                super().closeEvent(event)
+                return
+        except Exception:
+            pass
+
+        # For regular window close, minimize to tray instead of exiting
+        try:
+            try:
+                if not hasattr(self, "tray_manager") or getattr(self, "tray_manager") is None:
+                    self.init_tray()
+            except Exception:
+                pass
+
+            try:
+                self.hide()
+                if hasattr(self, "tray_manager") and getattr(self, "tray_manager") and getattr(self.tray_manager, "tray", None):
+                    try:
+                        # Use a short notification to indicate minimize
+                        self.tray_manager.tray.showMessage("Scrcpy-PyQt6", "Minimized to system tray", msecs=2000)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            event.ignore()
+            return
+        except Exception:
+            pass
+
+        # Fallback: persist and close
         try:
             self.save_settings_event()
         except Exception:
@@ -1443,8 +1778,43 @@ class ScrcpyWrapper(QMainWindow):
     def apply_profile(self, name):
         if not name or name not in self.profiles:
             return
+
+        # Apply stored settings for profile
         self.set_ui_state(self.profiles[name])
+
+        # Track active profile and update UI combo so tray can reflect it
+        try:
+            # set the active profile and ensure UI reflects it; keep minimal logging
+            self.active_profile = name
+            try:
+                idx = self.profile_combo.findText(name)
+                if idx != -1:
+                    self.profile_combo.setCurrentIndex(idx)
+                    QApplication.processEvents()
+            except Exception:
+                pass
+
+            # persist last-used profile in settings
+            try:
+                settings = load_settings()
+                settings["last_profile"] = name
+                save_settings(settings)
+            except Exception:
+                pass
+        except Exception as e:
+            self.log(f"Error applying profile: {e}", level=2)
+
         self.log(f"Applied profile '{name}'.")
+
+        # Update tray menu indicators
+        try:
+            if hasattr(self, "tray_manager") and getattr(self, "tray_manager"):
+                try:
+                    self.tray_manager.rebuild_profiles_menu()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     @pyqtSlot()
     def save_profile(self):
