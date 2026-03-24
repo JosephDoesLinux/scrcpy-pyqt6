@@ -16,10 +16,12 @@ echo "Creating user-local executable launcher in $BIN_DIR..."
 mkdir -p "$BIN_DIR"
 cat <<'EOF' > "$BIN_DIR/scrcpy-pyqt6"
 #!/bin/bash
-# Run using system Python to inherit desktop theme integration
+# Determine installation dir relative to this script (assumes ~/.local/bin -> ~/.local/share)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALL_DIR="$(cd "$SCRIPT_DIR/../share/scrcpy-pyqt6" && pwd)"
 SYS_PKGS=$(/usr/bin/python3 -c "import site; print(':'.join([p for p in site.getsitepackages() if not p.startswith('/usr/local')]))")
-export PYTHONPATH="${SYS_PKGS}:$INSTALL_DIR:$PYTHONPATH"
-exec /usr/bin/python3 "$INSTALL_DIR/main.py" "$@"
+export PYTHONPATH="${SYS_PKGS}:${INSTALL_DIR}:${PYTHONPATH}"
+exec /usr/bin/python3 "${INSTALL_DIR}/main.py" "$@"
 EOF
 chmod +x "$BIN_DIR/scrcpy-pyqt6"
 
