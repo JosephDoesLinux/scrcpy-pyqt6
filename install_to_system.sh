@@ -1,5 +1,5 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 echo "Integrating Scrcpy-PyQt6 into the user's local environment..."
 
@@ -10,18 +10,24 @@ APP_DIR="$HOME/.local/share/applications"
 echo "Copying application source files to $INSTALL_DIR..."
 rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
-cp -r src/* "$INSTALL_DIR/"
+cp -a src/. "$INSTALL_DIR/"
 
 echo "Creating user-local executable launcher in $BIN_DIR..."
 mkdir -p "$BIN_DIR"
 cat <<'EOF' > "$BIN_DIR/scrcpy-pyqt6"
-#!/bin/bash
-# Determine installation dir relative to this script (assumes ~/.local/bin -> ~/.local/share)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(cd "$SCRIPT_DIR/../share/scrcpy-pyqt6" && pwd)"
-SYS_PKGS=$(/usr/bin/python3 -c "import site; print(':'.join([p for p in site.getsitepackages() if not p.startswith('/usr/local')]))")
-export PYTHONPATH="${SYS_PKGS}:${INSTALL_DIR}:${PYTHONPATH}"
-exec /usr/bin/python3 "${INSTALL_DIR}/main.py" "$@"
+export PYTHONPATH="$INSTALL_DIR"
+
+if command -v python3 >/dev/null 2>&1; then
+	exec python3 "$INSTALL_DIR/main.py" "$@"
+fi
+
+echo "Error: python3 not found in PATH." >&2
+exit 1
 EOF
 chmod +x "$BIN_DIR/scrcpy-pyqt6"
 
@@ -39,7 +45,9 @@ Categories=Utility;System;
 Keywords=android;adb;scrcpy;screen;mirror;
 EOF
 chmod +x "$APP_DIR/scrcpy-pyqt6.desktop"
-update-desktop-database "$APP_DIR" || true
+if command -v update-desktop-database >/dev/null 2>&1; then
+	update-desktop-database "$APP_DIR" || true
+fi
 
 echo "Installation complete: application installed to $INSTALL_DIR using the system Python environment."
 echo "You can launch the application from your desktop environment menu or by running: $BIN_DIR/scrcpy-pyqt6"

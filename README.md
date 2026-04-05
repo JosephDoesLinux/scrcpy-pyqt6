@@ -18,6 +18,8 @@ Install (developer / personal)
 ./install_to_system.sh
 ```
 
+This installs the app to `~/.local/share/scrcpy-pyqt6` and creates a launcher at `~/.local/bin/scrcpy-pyqt6`.
+
 Uninstall
 - To remove the installed files run the uninstaller included with this repo:
 
@@ -40,6 +42,14 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+- Start in development mode with:
+
+```bash
+./start.sh
+```
+
+`start.sh` prefers `.venv/bin/python` when available, and falls back to `python3` if no virtualenv exists.
 
 Contributions
 - This is mainly for personal use; but suggestions, issues, and pull requests are welcome. Keep changes small and simple, not trying to build anything crazy here lol.

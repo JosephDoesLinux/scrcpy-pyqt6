@@ -13,8 +13,8 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Scrcpy-PyQt6")
-    # Ensure the desktop portal can find the app info by using the full .desktop filename
-    app.setDesktopFileName("scrcpy-pyqt6.desktop")
+    # Use desktop file name without suffix (Qt appends/handles .desktop internally)
+    app.setDesktopFileName("scrcpy-pyqt6")
 
     # Rely completely on the default Desktop Environment theme
 

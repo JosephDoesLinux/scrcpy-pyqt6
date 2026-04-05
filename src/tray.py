@@ -1,6 +1,5 @@
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QStyle
 from PyQt6.QtGui import QAction, QIcon
-from pathlib import Path
 from profiles import load_settings
 
 
@@ -12,6 +11,15 @@ class TrayManager:
         self.devices_menu = None
 
     def init_tray(self):
+        if self.tray is not None:
+            try:
+                self.rebuild_profiles_menu()
+                self.rebuild_devices_menu()
+                self.tray.show()
+            except Exception:
+                pass
+            return
+
         self.window.log("Initializing system tray...")
         if not QSystemTrayIcon.isSystemTrayAvailable():
             try:
@@ -309,6 +317,7 @@ class TrayManager:
         except Exception:
             pass
         try:
+            self.window._explicit_quit = True
             self.window.close()
         except Exception:
             pass
