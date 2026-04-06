@@ -20,7 +20,31 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(cd "$SCRIPT_DIR/../share/scrcpy-pyqt6" && pwd)"
-export PYTHONPATH="$INSTALL_DIR"
+
+get_distro_pyqt_site_packages() {
+	if [[ -x /usr/bin/python3 ]]; then
+		/usr/bin/python3 - <<'PY'
+import os
+import site
+
+paths = []
+for p in site.getsitepackages():
+    if p.startswith('/usr/lib') and os.path.isdir(os.path.join(p, 'PyQt6')):
+        paths.append(p)
+print(':'.join(paths))
+PY
+		return
+	fi
+
+	echo ""
+}
+
+DISTRO_SITE_PKGS="$(get_distro_pyqt_site_packages)"
+if [[ -n "$DISTRO_SITE_PKGS" ]]; then
+	export PYTHONPATH="$DISTRO_SITE_PKGS:$INSTALL_DIR${PYTHONPATH:+:$PYTHONPATH}"
+else
+	export PYTHONPATH="$INSTALL_DIR${PYTHONPATH:+:$PYTHONPATH}"
+fi
 
 if command -v python3 >/dev/null 2>&1; then
 	exec python3 "$INSTALL_DIR/main.py" "$@"

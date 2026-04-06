@@ -312,12 +312,15 @@ class TrayManager:
 
     def quit(self):
         try:
-            if self.tray:
-                self.tray.hide()
+            self.window._quit_from_menu()
         except Exception:
-            pass
-        try:
-            self.window._explicit_quit = True
-            self.window.close()
-        except Exception:
-            pass
+            try:
+                if self.tray:
+                    self.tray.hide()
+            except Exception:
+                pass
+            try:
+                self.window._explicit_quit = True
+                self.window.close()
+            except Exception:
+                pass

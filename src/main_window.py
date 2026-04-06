@@ -93,6 +93,38 @@ class ScrcpyWrapper(
             except Exception:
                 pass
 
+    def _apply_theme_aware_splitter_style(self):
+        """Update splitter handle styling from the active desktop palette."""
+        try:
+            if not hasattr(self, "splitter") or self.splitter is None:
+                return
+            pal = self.palette()
+            light = pal.color(QPalette.ColorRole.Light).name()
+            mid = pal.color(QPalette.ColorRole.Mid).name()
+            window = pal.color(QPalette.ColorRole.Window).name()
+            self.splitter.setStyleSheet(
+                f"QSplitter::handle {{ background: {window}; }}"
+                f"QSplitter::handle:vertical {{ border-top: 1px solid {light}; border-bottom: 1px solid {mid}; }}"
+            )
+        except Exception:
+            pass
+
+    def _apply_landscape_pane_constraints(self):
+        """Keep utility pane narrow by default and never wider than content pane."""
+        try:
+            if not hasattr(self, "left_col") or not hasattr(self, "right_col"):
+                return
+            total_width = max(1, self.width())
+            # 4-unit grid target: left=1, right=3
+            self.content_layout.setStretch(0, 1)
+            self.content_layout.setStretch(1, 3)
+            # Hard cap for narrow-landscape: left can be at most half (2/2)
+            self.left_col.setMaximumWidth(total_width // 2)
+            self.left_col.setMinimumWidth(0)
+            self.right_col.setMinimumWidth(0)
+        except Exception:
+            pass
+
     def init_ui(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -106,15 +138,8 @@ class ScrcpyWrapper(
         # make the handle a little wider so it's easier to grab
         self.splitter.setHandleWidth(10)
         self.splitter.setOpaqueResize(True)
-        # Use palette colors to create a subtle, theme-aware handle with thin dividers
-        pal = self.palette()
-        light = pal.color(QPalette.ColorRole.Light).name()
-        mid = pal.color(QPalette.ColorRole.Mid).name()
-        window = pal.color(QPalette.ColorRole.Window).name()
-        self.splitter.setStyleSheet(
-            f"QSplitter::handle {{ background: {window}; }}"
-            f"QSplitter::handle:vertical {{ border-top: 1px solid {light}; border-bottom: 1px solid {mid}; }}"
-        )
+        # Use palette colors so splitter follows KDE/desktop theme updates.
+        self._apply_theme_aware_splitter_style()
         main_layout.addWidget(self.splitter)
 
         top_widget = QWidget()
@@ -531,18 +556,8 @@ class ScrcpyWrapper(
             QEvent.Type.PaletteChange,
             QEvent.Type.StyleChange,
         ):
-            pal = self.palette()
-            light = pal.color(QPalette.ColorRole.Light).name()
-            mid = pal.color(QPalette.ColorRole.Mid).name()
-            window = pal.color(QPalette.ColorRole.Window).name()
             # Update splitter handle styling to match the new palette
-            try:
-                self.splitter.setStyleSheet(
-                    f"QSplitter::handle {{ background: {window}; }}"
-                    f"QSplitter::handle:vertical {{ border-top: 1px solid {light}; border-bottom: 1px solid {mid}; }}"
-                )
-            except Exception:
-                pass
+            self._apply_theme_aware_splitter_style()
 
         # (Console is created in init_ui; changeEvent should only update palette-related styling)
 
@@ -552,9 +567,11 @@ class ScrcpyWrapper(
             w = self.width()
             if w >= 1000:
                 self.content_layout.setDirection(QBoxLayout.Direction.LeftToRight)
-                # prefer left column narrower
-                self.content_layout.setStretch(0, 1)
-                self.content_layout.setStretch(1, 3)
+                self._apply_landscape_pane_constraints()
+                try:
+                    self.right_vlayout.setContentsMargins(0, 0, 0, 0)
+                except Exception:
+                    pass
                 # move console into left column under profiles if not already
                 try:
                     if (
@@ -575,6 +592,16 @@ class ScrcpyWrapper(
                 self.content_layout.setDirection(QBoxLayout.Direction.TopToBottom)
                 self.content_layout.setStretch(0, 0)
                 self.content_layout.setStretch(1, 0)
+                try:
+                    # remove landscape cap in portrait mode
+                    self.left_col.setMaximumWidth(16777215)
+                except Exception:
+                    pass
+                try:
+                    # Tiny gap between profile section (left column) and tab bar (right column).
+                    self.right_vlayout.setContentsMargins(0, 6, 0, 0)
+                except Exception:
+                    pass
                 # ensure console is in the splitter (bottom area)
                 try:
                     if (

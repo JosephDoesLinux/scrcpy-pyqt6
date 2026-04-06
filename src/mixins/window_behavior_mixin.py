@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QLabel, QPushButton
+from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QLabel, QPushButton, QApplication
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt
 
@@ -114,6 +114,23 @@ class WindowBehaviorMixin:
             self._explicit_quit = True
         except Exception:
             pass
+
+        # Ensure tray does not keep the process alive after window closes.
+        try:
+            tm = getattr(self, "tray_manager", None)
+            if tm and getattr(tm, "tray", None):
+                try:
+                    tm.tray.hide()
+                except Exception:
+                    pass
+                try:
+                    tm.tray.deleteLater()
+                except Exception:
+                    pass
+                tm.tray = None
+        except Exception:
+            pass
+
         try:
             self.close()
         except Exception:
@@ -121,6 +138,13 @@ class WindowBehaviorMixin:
                 super().close()
             except Exception:
                 pass
+
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                app.quit()
+        except Exception:
+            pass
 
     def _on_autostart_toggled(self, checked: bool):
         try:
@@ -191,7 +215,26 @@ class WindowBehaviorMixin:
                     self.save_settings_event()
                 except Exception:
                     pass
+
+                # On explicit quit, hide tray before closing so the app exits fully.
+                try:
+                    tm = getattr(self, "tray_manager", None)
+                    if tm and getattr(tm, "tray", None):
+                        try:
+                            tm.tray.hide()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
                 super().closeEvent(event)
+
+                try:
+                    app = QApplication.instance()
+                    if app is not None:
+                        app.quit()
+                except Exception:
+                    pass
                 return
         except Exception:
             pass
