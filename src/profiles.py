@@ -35,6 +35,11 @@ DEFAULT_PROFILES = {
         "no_window": True,
         "audio_source": 0,
     },
+    "OTG Only (PC Keyboard/Mouse)": {
+        "otg": True,
+        "keyboard_mode": 2,
+        "mouse_mode": 2,
+    },
     "Webcam (Linux V4L2)": {
         "video_source": 1,
         "v4l2_buffer": 50,

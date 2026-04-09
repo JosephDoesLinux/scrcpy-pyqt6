@@ -69,6 +69,7 @@ class ProfileMixin:
             "Wireless (Low Bandwidth)",
             "Gaming (Low Latency / UHID)",
             "Audio Only",
+            "OTG Only (PC Keyboard/Mouse)",
             "Webcam (Linux V4L2)",
         ]:
             QMessageBox.warning(

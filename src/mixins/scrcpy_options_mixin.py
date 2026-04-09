@@ -213,8 +213,9 @@ class ScrcpyOptionsMixin:
     def build_scrcpy_args(self) -> list:
         args = ["scrcpy"]
 
+        otg_enabled = self.opt_otg.isChecked()
         serial = self.device_combo.currentData()
-        if serial:
+        if serial and not otg_enabled:
             args.extend(["-s", serial])
 
         bitrate = self.opt_bitrate.currentText()
@@ -305,7 +306,7 @@ class ScrcpyOptionsMixin:
         if self.opt_power_off_close.isChecked():
             args.append("--power-off-on-close")
 
-        if self.opt_otg.isChecked():
+        if otg_enabled:
             args.append("--otg")
 
         if self.opt_disable_screensaver.isChecked():

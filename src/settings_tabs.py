@@ -413,7 +413,8 @@ class SettingsTabs(QWidget):
         name = self.profile_combo.currentText()
         _protected = {
             "Default", "Desktop (New Display)", "Wireless (Low Bandwidth)",
-            "Gaming (Low Latency / UHID)", "Audio Only", "Webcam (Linux V4L2)",
+            "Gaming (Low Latency / UHID)", "Audio Only", "OTG Only (PC Keyboard/Mouse)",
+            "Webcam (Linux V4L2)",
         }
         if name in _protected:
             QMessageBox.warning(self, "Delete Profile", "Cannot delete built-in profiles.")
