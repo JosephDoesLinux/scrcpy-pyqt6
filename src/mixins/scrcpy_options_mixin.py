@@ -1,14 +1,30 @@
 import shlex
+import time
 
 from PyQt6.QtCore import pyqtSlot
-from PyQt6.QtWidgets import QFileDialog, QFormLayout, QComboBox, QSpinBox, QCheckBox, QLineEdit, QPushButton, QHBoxLayout
+from PyQt6.QtWidgets import (
+    QFileDialog,
+    QFormLayout,
+    QComboBox,
+    QSpinBox,
+    QCheckBox,
+    QButtonGroup,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QHBoxLayout,
+    QRadioButton,
+    QGroupBox,
+    QVBoxLayout,
+)
+from adb import get_display_ids
 
 
 class ScrcpyOptionsMixin:
     def init_video_tab(self):
-        layout = QFormLayout(self.tab_video)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        root = QVBoxLayout(self.tab_video)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
 
         self.opt_bitrate = QComboBox()
         self.opt_bitrate.addItems(["Default (8M)", "16M", "24M", "2M", "4M", "32M"])
@@ -31,8 +47,16 @@ class ScrcpyOptionsMixin:
         self.opt_video_source.addItems(["display (Default)", "camera"])
 
         self.opt_display_id = QSpinBox()
-        self.opt_display_id.setRange(0, 10)
+        self.opt_display_id.setRange(0, 99999)
         self.opt_display_id.setValue(0)
+
+        self.opt_auto_virtual_display = QCheckBox(
+            "Auto-detect non-default display ID before launch"
+        )
+        self.btn_detect_virtual_display = QPushButton("Detect Virtual Display ID")
+        self.btn_detect_virtual_display.clicked.connect(
+            self.detect_virtual_display_id
+        )
 
         self.opt_camera_facing = QComboBox()
         self.opt_camera_facing.addItems(["any", "front", "back", "external"])
@@ -41,31 +65,88 @@ class ScrcpyOptionsMixin:
         self.opt_new_display_res = QLineEdit()
         self.opt_new_display_res.setPlaceholderText("Optional: e.g. 1920x1080/420")
 
+        self.opt_new_display_mode_builtin = QRadioButton(
+            "Use built-in scrcpy --new-display"
+        )
+        self.opt_new_display_mode_adb = QRadioButton(
+            "Use ADB overlay workaround"
+        )
+        self.opt_new_display_mode_builtin.setChecked(True)
+        self.new_display_mode_group = QButtonGroup(self)
+        self.new_display_mode_group.addButton(self.opt_new_display_mode_builtin)
+        self.new_display_mode_group.addButton(self.opt_new_display_mode_adb)
+
+        self.opt_adb_overlay_reset_on_close = QCheckBox(
+            "ADB workaround: set overlay_display_devices to none on close"
+        )
+        self.opt_adb_overlay_reset_on_close.setChecked(True)
+
         self.opt_fullscreen = QCheckBox("Start in Fullscreen (-f)")
         self.opt_always_on_top = QCheckBox("Always On Top (--always-on-top)")
         self.opt_borderless = QCheckBox("Borderless Window (--window-borderless)")
         self.opt_no_window = QCheckBox("Disable Window (--no-window)")
         self.opt_no_video = QCheckBox("Disable Video (--no-video)")
 
-        layout.addRow("Video Source:", self.opt_video_source)
-        layout.addRow("Display ID (--display-id):", self.opt_display_id)
-        layout.addRow("Camera Facing (--camera-facing):", self.opt_camera_facing)
-        layout.addRow("New Display:", self.opt_new_display)
-        layout.addRow("New Display Res:", self.opt_new_display_res)
-        layout.addRow("Video Bitrate (-b):", self.opt_bitrate)
-        layout.addRow("Max FPS (--max-fps):", self.opt_max_fps)
-        layout.addRow("Max Size (-m):", self.opt_max_size)
-        layout.addRow("Video Codec (--video-codec):", self.opt_codec)
-        layout.addRow("", self.opt_fullscreen)
-        layout.addRow("", self.opt_always_on_top)
-        layout.addRow("", self.opt_borderless)
-        layout.addRow("", self.opt_no_window)
-        layout.addRow("", self.opt_no_video)
+        src_group = QGroupBox("Display Source")
+        src_layout = QFormLayout(src_group)
+        src_layout.setSpacing(10)
+        src_layout.addRow("Video Source:", self.opt_video_source)
+        src_layout.addRow("Display ID (--display-id):", self.opt_display_id)
+        src_layout.addRow("Camera Facing (--camera-facing):", self.opt_camera_facing)
+
+        virtual_group = QGroupBox("Virtual Display")
+        virtual_layout = QFormLayout(virtual_group)
+        virtual_layout.setSpacing(10)
+        virtual_layout.addRow("New Display:", self.opt_new_display)
+        virtual_layout.addRow("New Display Res:", self.opt_new_display_res)
+        virtual_layout.addRow("", self.opt_new_display_mode_builtin)
+        virtual_layout.addRow("", self.opt_new_display_mode_adb)
+        virtual_layout.addRow("", self.opt_auto_virtual_display)
+        virtual_layout.addRow("", self.btn_detect_virtual_display)
+        virtual_layout.addRow("", self.opt_adb_overlay_reset_on_close)
+
+        quality_group = QGroupBox("Video Quality")
+        quality_layout = QFormLayout(quality_group)
+        quality_layout.setSpacing(10)
+        quality_layout.addRow("Video Bitrate (-b):", self.opt_bitrate)
+        quality_layout.addRow("Max FPS (--max-fps):", self.opt_max_fps)
+        quality_layout.addRow("Max Size (-m):", self.opt_max_size)
+        quality_layout.addRow("Video Codec (--video-codec):", self.opt_codec)
+
+        window_group = QGroupBox("Window Behavior")
+        window_layout = QFormLayout(window_group)
+        window_layout.setSpacing(10)
+        window_layout.addRow("", self.opt_fullscreen)
+        window_layout.addRow("", self.opt_always_on_top)
+        window_layout.addRow("", self.opt_borderless)
+        window_layout.addRow("", self.opt_no_window)
+        window_layout.addRow("", self.opt_no_video)
+
+        root.addWidget(src_group)
+        root.addWidget(virtual_group)
+        root.addWidget(quality_group)
+        root.addWidget(window_group)
+        root.addStretch(1)
+
+        self.opt_video_source.currentIndexChanged.connect(
+            self._sync_video_option_dependencies
+        )
+        self.opt_new_display.toggled.connect(self._sync_video_option_dependencies)
+        self.opt_new_display_mode_builtin.toggled.connect(
+            self._sync_video_option_dependencies
+        )
+        self.opt_new_display_mode_adb.toggled.connect(
+            self._sync_video_option_dependencies
+        )
+        self.opt_auto_virtual_display.toggled.connect(
+            self._sync_video_option_dependencies
+        )
+        self._sync_video_option_dependencies()
 
     def init_audio_tab(self):
-        layout = QFormLayout(self.tab_audio)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        root = QVBoxLayout(self.tab_audio)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
 
         self.opt_no_audio = QCheckBox("Disable Audio (--no-audio)")
 
@@ -88,15 +169,26 @@ class ScrcpyOptionsMixin:
             "Disable Audio Playback (--no-audio-playback)"
         )
 
-        layout.addRow("", self.opt_no_audio)
-        layout.addRow("Audio Source (--audio-source):", self.opt_audio_source)
-        layout.addRow("Audio Codec (--audio-codec):", self.opt_audio_codec)
-        layout.addRow("", self.opt_no_audio_playback)
+        capture_group = QGroupBox("Capture")
+        capture_layout = QFormLayout(capture_group)
+        capture_layout.setSpacing(10)
+        capture_layout.addRow("", self.opt_no_audio)
+        capture_layout.addRow("Audio Source (--audio-source):", self.opt_audio_source)
+        capture_layout.addRow("Audio Codec (--audio-codec):", self.opt_audio_codec)
+
+        playback_group = QGroupBox("Playback")
+        playback_layout = QFormLayout(playback_group)
+        playback_layout.setSpacing(10)
+        playback_layout.addRow("", self.opt_no_audio_playback)
+
+        root.addWidget(capture_group)
+        root.addWidget(playback_group)
+        root.addStretch(1)
 
     def init_control_tab(self):
-        layout = QFormLayout(self.tab_control)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        root = QVBoxLayout(self.tab_control)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
 
         self.opt_read_only = QCheckBox("Read-only (Disable control) (-n)")
 
@@ -118,20 +210,36 @@ class ScrcpyOptionsMixin:
             "Disable Screensaver (--disable-screensaver)"
         )
 
-        layout.addRow("Interaction:", self.opt_read_only)
-        layout.addRow("Input:", self.opt_keyboard_mode)
-        layout.addRow("", self.opt_mouse_mode)
-        layout.addRow("", self.opt_otg)
-        layout.addRow("Display:", self.opt_stay_awake)
-        layout.addRow("", self.opt_turn_screen_off)
-        layout.addRow("", self.opt_show_touches)
-        layout.addRow("", self.opt_disable_screensaver)
-        layout.addRow("Exit Behavior:", self.opt_power_off_close)
+        input_group = QGroupBox("Input")
+        input_layout = QFormLayout(input_group)
+        input_layout.setSpacing(10)
+        input_layout.addRow("Interaction:", self.opt_read_only)
+        input_layout.addRow("Keyboard (--keyboard):", self.opt_keyboard_mode)
+        input_layout.addRow("Mouse (--mouse):", self.opt_mouse_mode)
+        input_layout.addRow("", self.opt_otg)
+
+        display_group = QGroupBox("Device Display")
+        display_layout = QFormLayout(display_group)
+        display_layout.setSpacing(10)
+        display_layout.addRow("", self.opt_stay_awake)
+        display_layout.addRow("", self.opt_turn_screen_off)
+        display_layout.addRow("", self.opt_show_touches)
+        display_layout.addRow("", self.opt_disable_screensaver)
+
+        exit_group = QGroupBox("Exit Behavior")
+        exit_layout = QFormLayout(exit_group)
+        exit_layout.setSpacing(10)
+        exit_layout.addRow("", self.opt_power_off_close)
+
+        root.addWidget(input_group)
+        root.addWidget(display_group)
+        root.addWidget(exit_group)
+        root.addStretch(1)
 
     def init_record_tab(self):
-        layout = QFormLayout(self.tab_record)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        root = QVBoxLayout(self.tab_record)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
 
         self.opt_record_file = QLineEdit()
         self.opt_record_file.setPlaceholderText("e.g. /home/user/Videos/capture.mp4")
@@ -166,15 +274,29 @@ class ScrcpyOptionsMixin:
             "Record in background (Disable video and audio playback) (-N)"
         )
 
-        layout.addRow("Record File (-r):", record_file_layout)
-        layout.addRow("Record Format (--record-format):", self.opt_record_format)
-        layout.addRow("Record Orientation:", self.opt_record_orientation)
-        layout.addRow("", self.opt_no_playback)
+        output_group = QGroupBox("Output")
+        output_layout = QFormLayout(output_group)
+        output_layout.setSpacing(10)
+        output_layout.addRow("Record File (-r):", record_file_layout)
+        output_layout.addRow("Record Format (--record-format):", self.opt_record_format)
+
+        behavior_group = QGroupBox("Behavior")
+        behavior_layout = QFormLayout(behavior_group)
+        behavior_layout.setSpacing(10)
+        behavior_layout.addRow("Record Orientation:", self.opt_record_orientation)
+        behavior_layout.addRow("", self.opt_no_playback)
+
+        root.addWidget(output_group)
+        root.addWidget(behavior_group)
+        root.addStretch(1)
+
+        self.opt_record_file.textChanged.connect(self._sync_record_option_dependencies)
+        self._sync_record_option_dependencies()
 
     def init_advanced_tab(self):
-        layout = QFormLayout(self.tab_advanced)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        root = QVBoxLayout(self.tab_advanced)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
 
         self.opt_v4l2_sink = QLineEdit()
         self.opt_v4l2_sink.setPlaceholderText("e.g. /dev/video0 (Linux Only)")
@@ -194,10 +316,52 @@ class ScrcpyOptionsMixin:
             "e.g. --legacy-paste --shortcut-mod=lalt"
         )
 
-        layout.addRow("V4L2 Sink (Webcam mode):", self.opt_v4l2_sink)
-        layout.addRow("V4L2 Buffer (ms):", self.opt_v4l2_buffer)
-        layout.addRow("Start App on Launch:", self.opt_start_app)
-        layout.addRow("Custom Arguments:", self.opt_custom_args)
+        self.opt_pre_launch_cmd = QLineEdit()
+        self.opt_pre_launch_cmd.setPlaceholderText(
+            "Optional shell command to run before scrcpy starts"
+        )
+
+        self.opt_post_close_cmd = QLineEdit()
+        self.opt_post_close_cmd.setPlaceholderText(
+            "Optional shell command to run after scrcpy exits"
+        )
+
+        self.opt_env_vars = QPlainTextEdit()
+        self.opt_env_vars.setPlaceholderText(
+            "Optional environment variables (one per line), e.g.\n"
+            "ADB=/usr/bin/adb\n"
+            "SCRCPY_ICON_PATH=/path/to/icon.png"
+        )
+        self.opt_env_vars.setMinimumHeight(100)
+
+        integration_group = QGroupBox("Integrations")
+        integration_layout = QFormLayout(integration_group)
+        integration_layout.setSpacing(10)
+        integration_layout.addRow("V4L2 Sink (Webcam mode):", self.opt_v4l2_sink)
+        integration_layout.addRow("V4L2 Buffer (ms):", self.opt_v4l2_buffer)
+        integration_layout.addRow("Start App on Launch:", self.opt_start_app)
+        integration_layout.addRow("Custom Arguments:", self.opt_custom_args)
+
+        hooks_group = QGroupBox("Hooks")
+        hooks_layout = QFormLayout(hooks_group)
+        hooks_layout.setSpacing(10)
+        hooks_layout.addRow("Pre-launch Command:", self.opt_pre_launch_cmd)
+        hooks_layout.addRow("Post-close Command:", self.opt_post_close_cmd)
+
+        env_group = QGroupBox("Environment")
+        env_layout = QFormLayout(env_group)
+        env_layout.setSpacing(10)
+        env_layout.addRow("Environment Variables:", self.opt_env_vars)
+
+        root.addWidget(integration_group)
+        root.addWidget(hooks_group)
+        root.addWidget(env_group)
+        root.addStretch(1)
+
+        self.opt_v4l2_sink.textChanged.connect(self._sync_advanced_option_dependencies)
+        self.opt_pre_launch_cmd.textChanged.connect(self._sync_video_option_dependencies)
+        self._sync_advanced_option_dependencies()
+        self._sync_video_option_dependencies()
 
     @pyqtSlot()
     def browse_record_file(self):
@@ -209,6 +373,62 @@ class ScrcpyOptionsMixin:
         )
         if filepath:
             self.opt_record_file.setText(filepath)
+
+    def _prelaunch_creates_overlay_display(self) -> bool:
+        if not hasattr(self, "opt_pre_launch_cmd"):
+            return False
+
+        cmd = (self.opt_pre_launch_cmd.text() or "").strip().lower()
+        if not cmd:
+            return False
+
+        return (
+            "settings put global" in cmd
+            and "overlay_display_devices" in cmd
+            and "overlay_display_devices none" not in cmd
+        )
+
+    def _sync_video_option_dependencies(self):
+        try:
+            source = self.opt_video_source.currentText().split()[0]
+        except Exception:
+            source = "display"
+
+        using_display_source = source == "display"
+        manual_overlay = self._prelaunch_creates_overlay_display()
+        new_display_enabled = using_display_source and self.opt_new_display.isChecked()
+
+        self.opt_camera_facing.setEnabled(not using_display_source)
+        self.opt_new_display.setEnabled(using_display_source)
+        self.opt_new_display_res.setEnabled(new_display_enabled)
+        self.opt_new_display_mode_builtin.setEnabled(new_display_enabled)
+        self.opt_new_display_mode_adb.setEnabled(new_display_enabled)
+
+        use_adb_overlay_mode = (
+            new_display_enabled and self.opt_new_display_mode_adb.isChecked()
+        )
+        self.opt_adb_overlay_reset_on_close.setEnabled(use_adb_overlay_mode)
+
+        auto_detect_allowed = using_display_source and (
+            new_display_enabled or manual_overlay
+        )
+        self.opt_auto_virtual_display.setEnabled(auto_detect_allowed)
+        self.btn_detect_virtual_display.setEnabled(auto_detect_allowed)
+
+        effective_auto_detect = (
+            auto_detect_allowed and self.opt_auto_virtual_display.isChecked()
+        )
+        self.opt_display_id.setEnabled(using_display_source and not effective_auto_detect)
+
+    def _sync_record_option_dependencies(self):
+        has_record_target = bool(self.opt_record_file.text().strip())
+        self.opt_record_format.setEnabled(has_record_target)
+        self.opt_record_orientation.setEnabled(has_record_target)
+        self.opt_no_playback.setEnabled(has_record_target)
+
+    def _sync_advanced_option_dependencies(self):
+        has_v4l2_sink = bool(self.opt_v4l2_sink.text().strip())
+        self.opt_v4l2_buffer.setEnabled(has_v4l2_sink)
 
     def build_scrcpy_args(self) -> list:
         args = ["scrcpy"]
@@ -247,14 +467,29 @@ class ScrcpyOptionsMixin:
         if self.opt_no_video.isChecked():
             args.append("--no-video")
 
-        if self.opt_new_display.isChecked():
+        video_source = self.opt_video_source.currentText().split()[0]
+        use_adb_overlay_mode = (
+            self.opt_new_display.isChecked()
+            and video_source == "display"
+            and self.opt_new_display_mode_adb.isChecked()
+        )
+
+        if (
+            self.opt_new_display.isChecked()
+            and video_source == "display"
+            and not use_adb_overlay_mode
+        ):
             res = self.opt_new_display_res.text().strip()
             if res:
                 args.append(f"--new-display={res}")
             else:
                 args.append("--new-display")
 
-        video_source = self.opt_video_source.currentText().split()[0]
+        effective_auto_detect = (
+            self.opt_auto_virtual_display.isChecked()
+            and (self.opt_new_display.isChecked() or self._prelaunch_creates_overlay_display())
+        )
+
         if video_source != "display":
             args.extend(["--video-source", video_source])
             camera_facing = self.opt_camera_facing.currentText()
@@ -262,7 +497,7 @@ class ScrcpyOptionsMixin:
                 args.extend(["--camera-facing", camera_facing])
         else:
             display_id = self.opt_display_id.value()
-            if display_id > 0:
+            if display_id > 0 and not effective_auto_detect and not use_adb_overlay_mode:
                 args.extend(["--display-id", str(display_id)])
 
         record_file = self.opt_record_file.text().strip()
@@ -337,6 +572,71 @@ class ScrcpyOptionsMixin:
 
         return args
 
+    def detect_virtual_display_id(self, retries: int = 1, delay_seconds: float = 0.25):
+        if getattr(self, "_detect_display_in_progress", False):
+            return None
+
+        serial = None
+        try:
+            serial = self.device_combo.currentData()
+        except Exception:
+            serial = None
+
+        attempts = max(1, int(retries or 1))
+        delay = max(0.0, float(delay_seconds or 0.0))
+        self._detect_display_in_progress = True
+        try:
+            self.btn_detect_virtual_display.setEnabled(False)
+        except Exception:
+            pass
+
+        def _work():
+            ids = []
+            for attempt in range(attempts):
+                ids = get_display_ids(serial=serial, non_default_only=True)
+                if ids:
+                    break
+                if attempt < attempts - 1:
+                    time.sleep(delay)
+            return ids
+
+        def _on_result(ids):
+            if not ids:
+                try:
+                    self.log(
+                        "No non-default display IDs detected via adb dumpsys display.",
+                        level=1,
+                    )
+                except Exception:
+                    pass
+                return
+
+            chosen = max(ids)
+            self.opt_display_id.setValue(chosen)
+            try:
+                ids_text = ", ".join(str(i) for i in ids)
+                self.log(
+                    f"Detected non-default display IDs: {ids_text}. Using display ID {chosen}."
+                )
+            except Exception:
+                pass
+
+        def _on_error(msg):
+            try:
+                self.log(f"Display ID detection failed: {msg}", level=2)
+            except Exception:
+                pass
+
+        def _on_done():
+            self._detect_display_in_progress = False
+            try:
+                self._sync_video_option_dependencies()
+            except Exception:
+                pass
+
+        self._run_background(_work, _on_result, _on_error, _on_done)
+        return None
+
     def get_ui_state(self):
         return {
             "bitrate": self.opt_bitrate.currentText(),
@@ -345,6 +645,7 @@ class ScrcpyOptionsMixin:
             "codec": self.opt_codec.currentIndex(),
             "video_source": self.opt_video_source.currentIndex(),
             "display_id": self.opt_display_id.value(),
+            "auto_virtual_display": self.opt_auto_virtual_display.isChecked(),
             "camera_facing": self.opt_camera_facing.currentIndex(),
             "fullscreen": self.opt_fullscreen.isChecked(),
             "always_on_top": self.opt_always_on_top.isChecked(),
@@ -353,6 +654,12 @@ class ScrcpyOptionsMixin:
             "no_video": self.opt_no_video.isChecked(),
             "new_display": self.opt_new_display.isChecked(),
             "new_display_res": self.opt_new_display_res.text(),
+            "new_display_mode": (
+                "adb_overlay"
+                if self.opt_new_display_mode_adb.isChecked()
+                else "builtin"
+            ),
+            "adb_overlay_reset_on_close": self.opt_adb_overlay_reset_on_close.isChecked(),
             "no_audio": self.opt_no_audio.isChecked(),
             "audio_source": self.opt_audio_source.currentIndex(),
             "audio_codec": self.opt_audio_codec.currentIndex(),
@@ -371,6 +678,11 @@ class ScrcpyOptionsMixin:
             "no_playback": self.opt_no_playback.isChecked(),
             "v4l2_sink": self.opt_v4l2_sink.text(),
             "v4l2_buffer": self.opt_v4l2_buffer.value(),
+            "start_app": self.opt_start_app.text(),
+            "custom_args": self.opt_custom_args.text(),
+            "pre_launch_cmd": self.opt_pre_launch_cmd.text(),
+            "post_close_cmd": self.opt_post_close_cmd.text(),
+            "env_vars_text": self.opt_env_vars.toPlainText(),
         }
 
     def set_ui_state(self, state):
@@ -380,6 +692,9 @@ class ScrcpyOptionsMixin:
         self.opt_codec.setCurrentIndex(state.get("codec", 0))
         self.opt_video_source.setCurrentIndex(state.get("video_source", 0))
         self.opt_display_id.setValue(state.get("display_id", 0))
+        self.opt_auto_virtual_display.setChecked(
+            state.get("auto_virtual_display", False)
+        )
         self.opt_camera_facing.setCurrentIndex(state.get("camera_facing", 0))
         self.opt_fullscreen.setChecked(state.get("fullscreen", False))
         self.opt_always_on_top.setChecked(state.get("always_on_top", False))
@@ -388,6 +703,13 @@ class ScrcpyOptionsMixin:
         self.opt_no_video.setChecked(state.get("no_video", False))
         self.opt_new_display.setChecked(state.get("new_display", False))
         self.opt_new_display_res.setText(state.get("new_display_res", ""))
+        if state.get("new_display_mode", "builtin") == "adb_overlay":
+            self.opt_new_display_mode_adb.setChecked(True)
+        else:
+            self.opt_new_display_mode_builtin.setChecked(True)
+        self.opt_adb_overlay_reset_on_close.setChecked(
+            state.get("adb_overlay_reset_on_close", True)
+        )
 
         self.opt_no_audio.setChecked(state.get("no_audio", False))
         self.opt_audio_source.setCurrentIndex(state.get("audio_source", 0))
@@ -410,5 +732,14 @@ class ScrcpyOptionsMixin:
 
         self.opt_v4l2_sink.setText(state.get("v4l2_sink", ""))
         self.opt_v4l2_buffer.setValue(state.get("v4l2_buffer", 0))
+        self.opt_start_app.setText(state.get("start_app", ""))
+        self.opt_custom_args.setText(state.get("custom_args", ""))
+        self.opt_pre_launch_cmd.setText(state.get("pre_launch_cmd", ""))
+        self.opt_post_close_cmd.setText(state.get("post_close_cmd", ""))
+        self.opt_env_vars.setPlainText(state.get("env_vars_text", ""))
         if state.get("v4l2_sink_default", False) and not self.opt_v4l2_sink.text().strip():
             self.opt_v4l2_sink.setText("/dev/video0")
+
+        self._sync_video_option_dependencies()
+        self._sync_record_option_dependencies()
+        self._sync_advanced_option_dependencies()

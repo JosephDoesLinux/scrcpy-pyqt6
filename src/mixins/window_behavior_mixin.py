@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QLabel, QPushButton, QApplication
+from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QLabel, QPushButton, QApplication, QTextEdit
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt
 
@@ -35,6 +35,11 @@ class WindowBehaviorMixin:
         file_menu.addAction(exit_action)
 
         help_menu = menubar.addMenu("&Help")
+        shortcuts_action = QAction("Shortcuts", self)
+        shortcuts_action.triggered.connect(self.show_shortcuts)
+        help_menu.addAction(shortcuts_action)
+
+        help_menu.addSeparator()
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
@@ -53,6 +58,107 @@ class WindowBehaviorMixin:
         lbl.setOpenExternalLinks(True)
         lbl.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(lbl)
+        ok = QPushButton("OK")
+        ok.clicked.connect(dlg.accept)
+        layout.addWidget(ok, alignment=Qt.AlignmentFlag.AlignRight)
+        dlg.exec()
+
+    def show_shortcuts(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Shortcuts")
+        dlg.resize(720, 680)
+        layout = QVBoxLayout(dlg)
+
+        info = QLabel(
+            "In the list below, MOD is the shortcut modifier. By default, it is left Alt or left Super."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        shortcuts_text = (
+            "MOD+f\n"
+            "    Switch fullscreen mode\n\n"
+            "MOD+Left\n"
+            "    Rotate display left\n\n"
+            "MOD+Right\n"
+            "    Rotate display right\n\n"
+            "MOD+Shift+Left\n"
+            "MOD+Shift+Right\n"
+            "    Flip display horizontally\n\n"
+            "MOD+Shift+Up\n"
+            "MOD+Shift+Down\n"
+            "    Flip display vertically\n\n"
+            "MOD+z\n"
+            "    Pause or re-pause display\n\n"
+            "MOD+Shift+z\n"
+            "    Unpause display\n\n"
+            "MOD+Shift+r\n"
+            "    Reset video capture/encoding\n\n"
+            "MOD+g\n"
+            "    Resize window to 1:1 (pixel-perfect)\n\n"
+            "MOD+w\n"
+            "Double-click on black borders\n"
+            "    Resize window to remove black borders\n\n"
+            "MOD+h\n"
+            "Middle-click\n"
+            "    Click on HOME\n\n"
+            "MOD+b\n"
+            "MOD+Backspace\n"
+            "Right-click (when screen is on)\n"
+            "    Click on BACK\n\n"
+            "MOD+s\n"
+            "4th-click\n"
+            "    Click on APP_SWITCH\n\n"
+            "MOD+m\n"
+            "    Click on MENU\n\n"
+            "MOD+Up\n"
+            "    Click on VOLUME_UP\n\n"
+            "MOD+Down\n"
+            "    Click on VOLUME_DOWN\n\n"
+            "MOD+p\n"
+            "    Click on POWER (turn screen on/off)\n\n"
+            "Right-click (when screen is off)\n"
+            "    Power on\n\n"
+            "MOD+o\n"
+            "    Turn device screen off (keep mirroring)\n\n"
+            "MOD+Shift+o\n"
+            "    Turn device screen on\n\n"
+            "MOD+r\n"
+            "    Rotate device screen\n\n"
+            "MOD+n\n"
+            "5th-click\n"
+            "    Expand notification panel\n\n"
+            "MOD+Shift+n\n"
+            "    Collapse notification panel\n\n"
+            "MOD+c\n"
+            "    Copy to clipboard (inject COPY keycode, Android >= 7 only)\n\n"
+            "MOD+x\n"
+            "    Cut to clipboard (inject CUT keycode, Android >= 7 only)\n\n"
+            "MOD+v\n"
+            "    Copy computer clipboard to device, then paste (inject PASTE keycode, Android >= 7 only)\n\n"
+            "MOD+Shift+v\n"
+            "    Inject computer clipboard text as a sequence of key events\n\n"
+            "MOD+k\n"
+            "    Open keyboard settings on the device (for HID keyboard only)\n\n"
+            "MOD+i\n"
+            "    Enable/disable FPS counter (print frames/second in logs)\n\n"
+            "Ctrl+click-and-move\n"
+            "    Pinch-to-zoom and rotate from the center of the screen\n\n"
+            "Shift+click-and-move\n"
+            "    Tilt vertically (slide with 2 fingers)\n\n"
+            "Ctrl+Shift+click-and-move\n"
+            "    Tilt horizontally (slide with 2 fingers)\n\n"
+            "Drag & drop APK file\n"
+            "    Install APK from computer\n\n"
+            "Drag & drop non-APK file\n"
+            "    Push file to device (see --push-target)\n"
+        )
+
+        text = QTextEdit(dlg)
+        text.setReadOnly(True)
+        text.setPlainText(shortcuts_text)
+        layout.addWidget(text)
+
         ok = QPushButton("OK")
         ok.clicked.connect(dlg.accept)
         layout.addWidget(ok, alignment=Qt.AlignmentFlag.AlignRight)

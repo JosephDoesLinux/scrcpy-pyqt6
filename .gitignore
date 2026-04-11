@@ -27,3 +27,6 @@ build/
 .pytest_cache/
 .cache/
 .local/
+
+# Local assistant/project tracking notes
+.copilot-state/

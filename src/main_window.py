@@ -17,9 +17,11 @@ from PyQt6.QtWidgets import (
     QFrame,
 )
 from PyQt6.QtWidgets import QBoxLayout
-from PyQt6.QtCore import Qt, QProcess, pyqtSlot, QTimer, QEvent
+from PyQt6.QtCore import Qt, QProcess, QProcessEnvironment, pyqtSlot, QTimer, QEvent
+import os
 import subprocess
 import re
+import time
 from PyQt6.QtGui import QIcon, QFont, QPalette
 import sys
 from profiles import (
@@ -27,10 +29,15 @@ from profiles import (
     load_settings,
     save_settings,
 )
+from adb import get_display_ids
 from mixins.scrcpy_options_mixin import ScrcpyOptionsMixin
 from mixins.device_ops_mixin import DeviceOpsMixin
 from mixins.profile_mixin import ProfileMixin
 from mixins.window_behavior_mixin import WindowBehaviorMixin
+
+
+HOOK_TIMEOUT_SECONDS = 20
+ADB_COMMAND_TIMEOUT_SECONDS = 8
 
 
 class ScrcpyWrapper(
@@ -188,6 +195,9 @@ class ScrcpyWrapper(
             if hasattr(self, "tray_manager") and self.tray_manager
             else None
         )
+        self.device_combo.currentIndexChanged.connect(
+            lambda _: self._update_recovery_controls()
+        )
         usb_icon_label = QLabel()
         usb_icon = QIcon.fromTheme("usb").pixmap(16, 16)
         if not usb_icon.isNull():
@@ -301,6 +311,37 @@ class ScrcpyWrapper(
         dev_row3.addWidget(help_manual)
         device_layout.addLayout(dev_row3)
 
+        # Section: Recovery Actions
+        recovery_group = QGroupBox("Recovery")
+        recovery_layout = QVBoxLayout(recovery_group)
+        recovery_layout.setContentsMargins(12, 10, 12, 10)
+        recovery_layout.setSpacing(8)
+
+        self.btn_restart_systemui = QPushButton(" Emergency Restart SystemUI")
+        self.btn_restart_systemui.setFont(child_font)
+        recovery_icon = QIcon.fromTheme("process-stop")
+        if recovery_icon.isNull():
+            recovery_icon = self.style().standardIcon(
+                QStyle.StandardPixmap.SP_MessageBoxWarning
+            )
+        self.btn_restart_systemui.setIcon(recovery_icon)
+        self.btn_restart_systemui.setMinimumHeight(34)
+        self.btn_restart_systemui.setToolTip(
+            "Force-restart Android SystemUI on the selected device if the UI is frozen."
+        )
+        self.btn_restart_systemui.setEnabled(False)
+        self.btn_restart_systemui.clicked.connect(self.emergency_restart_systemui)
+        recovery_layout.addWidget(self.btn_restart_systemui)
+
+        recovery_hint = QLabel(
+            "Use only for frozen Android UI. Requires a selected connected device."
+        )
+        recovery_hint.setWordWrap(True)
+        recovery_hint.setFont(child_font)
+        recovery_layout.addWidget(recovery_hint)
+
+        device_layout.addWidget(recovery_group)
+
         # Small status label for network operations
         self.network_status = QLabel("")
         self.network_status.setFont(child_font)
@@ -312,11 +353,22 @@ class ScrcpyWrapper(
         # keep an in-memory set of discovered network addresses for health checks
         self.discovered_addresses = set()
 
+        # Recovery action state
+        self._recovery_running = False
+        self._recovery_cooldown_active = False
+        self._recovery_cooldown_deadline = 0.0
+        self._systemui_recovery_process = None
+
         # Health check timer (attempt reconnects when Auto-connect is enabled)
         self.health_timer = QTimer(self)
         self.health_timer.setInterval(10_000)  # 10 seconds
         self.health_timer.timeout.connect(self.check_device_health)
         self.health_timer.start()
+
+        try:
+            self._update_recovery_controls()
+        except Exception:
+            pass
 
         # --- Responsive content container ---
         content_widget = QWidget()
@@ -701,6 +753,360 @@ class ScrcpyWrapper(
         scrollbar = self.console.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
+    def _parse_env_vars(self, raw_text: str) -> dict[str, str]:
+        env: dict[str, str] = {}
+        text = (raw_text or "").strip()
+        if not text:
+            return env
+
+        for idx, line in enumerate(text.splitlines(), 1):
+            item = line.strip()
+            if not item or item.startswith("#"):
+                continue
+
+            if item.startswith("export "):
+                item = item[7:].strip()
+
+            if "=" not in item:
+                self.log(f"Skipping environment line {idx}: expected KEY=VALUE", level=1)
+                continue
+
+            key, value = item.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+
+            if not key:
+                self.log(f"Skipping environment line {idx}: empty key", level=1)
+                continue
+
+            if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+                self.log(f"Skipping environment line {idx}: invalid key '{key}'", level=1)
+                continue
+
+            env[key] = value
+
+        return env
+
+    def _emit_log_messages(self, messages):
+        for level, text in messages or []:
+            self.log(text, level=level)
+
+    def _run_shell_hook_blocking(
+        self,
+        label: str,
+        command: str,
+        env_overrides: dict[str, str] | None = None,
+    ):
+        logs = []
+        cmd = (command or "").strip()
+        if not cmd:
+            return logs
+
+        logs.append((0, f"Running {label} command: {cmd}"))
+        try:
+            merged_env = os.environ.copy()
+            if env_overrides:
+                merged_env.update(env_overrides)
+
+            result = subprocess.run(
+                ["bash", "-lc", cmd],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=merged_env,
+                timeout=HOOK_TIMEOUT_SECONDS,
+            )
+
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+
+            if stdout:
+                for line in stdout.splitlines():
+                    logs.append((0, f"{label} stdout: {line}"))
+
+            if stderr:
+                for line in stderr.splitlines():
+                    logs.append((0, f"{label} stderr: {line}"))
+
+            if result.returncode != 0:
+                logs.append((1, f"{label} command exited with code {result.returncode}."))
+        except subprocess.TimeoutExpired:
+            logs.append((1, f"{label} command timed out after {HOOK_TIMEOUT_SECONDS}s."))
+        except Exception as e:
+            logs.append((2, f"{label} command failed: {e}"))
+
+        return logs
+
+    def _run_adb_overlay_command_blocking(
+        self,
+        value: str,
+        serial: str | None,
+        env_overrides: dict[str, str] | None = None,
+    ):
+        cmd = ["adb"]
+        if serial:
+            cmd.extend(["-s", serial])
+        cmd.extend(["shell", "settings", "put", "global", "overlay_display_devices", value])
+
+        logs = [(0, f"ADB overlay command: {' '.join(cmd)}")]
+        try:
+            merged_env = os.environ.copy()
+            if env_overrides:
+                merged_env.update(env_overrides)
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=merged_env,
+                timeout=ADB_COMMAND_TIMEOUT_SECONDS,
+            )
+
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+            if stdout:
+                for line in stdout.splitlines():
+                    logs.append((0, f"ADB overlay stdout: {line}"))
+            if stderr:
+                for line in stderr.splitlines():
+                    logs.append((0, f"ADB overlay stderr: {line}"))
+
+            if result.returncode != 0:
+                logs.append((1, f"ADB overlay command exited with code {result.returncode}."))
+                return {"ok": False, "logs": logs}
+            return {"ok": True, "logs": logs}
+        except subprocess.TimeoutExpired:
+            logs.append((1, f"ADB overlay command timed out after {ADB_COMMAND_TIMEOUT_SECONDS}s."))
+            return {"ok": False, "logs": logs}
+        except Exception as e:
+            logs.append((2, f"ADB overlay command failed: {e}"))
+            return {"ok": False, "logs": logs}
+
+    def _detect_virtual_display_id_blocking(
+        self,
+        serial: str | None,
+        retries: int = 1,
+        delay_seconds: float = 0.25,
+    ):
+        attempts = max(1, int(retries or 1))
+        ids = []
+        for attempt in range(attempts):
+            ids = get_display_ids(serial=serial, non_default_only=True)
+            if ids:
+                return max(ids), ids
+            if attempt < attempts - 1:
+                time.sleep(max(0.0, float(delay_seconds or 0.0)))
+
+        return None, []
+
+    def _prepare_launch_context_blocking(self, prep):
+        logs = []
+        try:
+            logs.extend(
+                self._run_shell_hook_blocking(
+                    "Pre-launch",
+                    prep.get("pre_launch_cmd", ""),
+                    prep.get("env_overrides", {}),
+                )
+            )
+
+            detected_display_id = None
+            launch_serial = prep.get("launch_serial")
+            env_overrides = prep.get("env_overrides", {})
+
+            if prep.get("use_adb_overlay_mode"):
+                existing_ids = get_display_ids(serial=launch_serial, non_default_only=True)
+                if existing_ids:
+                    detected_display_id = max(existing_ids)
+                    ids_text = ", ".join(str(i) for i in existing_ids)
+                    logs.append(
+                        (
+                            0,
+                            f"ADB workaround: reusing existing non-default display IDs: {ids_text}. "
+                            f"Using display ID {detected_display_id}.",
+                        )
+                    )
+                else:
+                    overlay_spec = prep.get("overlay_spec", "")
+                    if not overlay_spec:
+                        logs.append(
+                            (
+                                1,
+                                "ADB workaround selected, but New Display Res is empty. "
+                                "Provide WIDTHxHEIGHT/DPI (example: 1920x1080/160).",
+                            )
+                        )
+                        return {
+                            "ok": False,
+                            "logs": logs,
+                            "request_cleanup": False,
+                        }
+
+                    overlay_result = self._run_adb_overlay_command_blocking(
+                        overlay_spec,
+                        launch_serial,
+                        env_overrides,
+                    )
+                    logs.extend(overlay_result["logs"])
+                    if not overlay_result["ok"]:
+                        logs.append((1, "Failed to create ADB overlay display. Launch cancelled."))
+                        return {
+                            "ok": False,
+                            "logs": logs,
+                            "request_cleanup": False,
+                        }
+
+                    detected_display_id, ids = self._detect_virtual_display_id_blocking(
+                        launch_serial,
+                        retries=20,
+                        delay_seconds=0.25,
+                    )
+
+                    if detected_display_id is None:
+                        logs.append(
+                            (
+                                1,
+                                "No non-default display IDs detected via adb dumpsys display.",
+                            )
+                        )
+                        logs.append(
+                            (
+                                1,
+                                "ADB workaround created overlay but no non-default display ID was detected. "
+                                "Launch cancelled.",
+                            )
+                        )
+                        return {
+                            "ok": False,
+                            "logs": logs,
+                            "request_cleanup": bool(prep.get("adb_overlay_reset_on_close")),
+                        }
+
+                    ids_text = ", ".join(str(i) for i in ids)
+                    logs.append(
+                        (
+                            0,
+                            f"Detected non-default display IDs: {ids_text}. Using display ID {detected_display_id}.",
+                        )
+                    )
+
+            if prep.get("auto_detect_display"):
+                detected_display_id, ids = self._detect_virtual_display_id_blocking(
+                    launch_serial,
+                    retries=20,
+                    delay_seconds=0.25,
+                )
+                if detected_display_id is None:
+                    logs.append(
+                        (
+                            1,
+                            "No non-default display IDs detected via adb dumpsys display.",
+                        )
+                    )
+                    logs.append(
+                        (
+                            1,
+                            "Auto-detect display ID is enabled, but no non-default display ID was found after pre-launch. "
+                            "Launch cancelled to avoid using display 0.",
+                        )
+                    )
+                    return {
+                        "ok": False,
+                        "logs": logs,
+                        "request_cleanup": bool(prep.get("cleanup_on_close_armed")),
+                    }
+
+                ids_text = ", ".join(str(i) for i in ids)
+                logs.append(
+                    (
+                        0,
+                        f"Detected non-default display IDs: {ids_text}. Using display ID {detected_display_id}.",
+                    )
+                )
+
+            return {
+                "ok": True,
+                "logs": logs,
+                "detected_display_id": detected_display_id,
+                "request_cleanup": False,
+            }
+        except Exception as e:
+            logs.append((2, f"Launch preparation failed: {e}"))
+            return {
+                "ok": False,
+                "logs": logs,
+                "request_cleanup": bool(prep.get("cleanup_on_close_armed")),
+            }
+
+    def _run_shell_hook(self, label: str, command: str, env_overrides: dict[str, str] | None = None):
+        self._emit_log_messages(
+            self._run_shell_hook_blocking(label, command, env_overrides)
+        )
+
+    def _run_adb_overlay_command(self, value: str, serial: str | None, env_overrides: dict[str, str] | None = None) -> bool:
+        result = self._run_adb_overlay_command_blocking(value, serial, env_overrides)
+        self._emit_log_messages(result.get("logs", []))
+        return bool(result.get("ok"))
+
+    def _cleanup_adb_overlay_if_needed(self):
+        if not getattr(self, "_adb_overlay_cleanup_on_close", False):
+            return
+
+        serial = getattr(self, "_last_launch_serial", None)
+        env_overrides = getattr(self, "_last_launch_env_overrides", {})
+        result = self._run_adb_overlay_command_blocking("none", serial, env_overrides)
+        self._emit_log_messages(result.get("logs", []))
+
+        if result.get("ok"):
+            self.log("ADB overlay cleanup complete (overlay_display_devices=none).")
+        else:
+            self.log("ADB overlay cleanup failed.", level=1)
+
+        self._adb_overlay_cleanup_on_close = False
+        self._adb_overlay_mode_active = False
+
+    def _cleanup_adb_overlay_if_needed_async(self):
+        if not getattr(self, "_adb_overlay_cleanup_on_close", False):
+            return
+
+        serial = getattr(self, "_last_launch_serial", None)
+        env_overrides = getattr(self, "_last_launch_env_overrides", {})
+        self._adb_overlay_cleanup_on_close = False
+        self._adb_overlay_mode_active = False
+
+        def _work():
+            return self._run_adb_overlay_command_blocking("none", serial, env_overrides)
+
+        def _on_result(result):
+            self._emit_log_messages(result.get("logs", []))
+            if result.get("ok"):
+                self.log("ADB overlay cleanup complete (overlay_display_devices=none).")
+            else:
+                self.log("ADB overlay cleanup failed.", level=1)
+
+        def _on_error(msg):
+            self.log(f"ADB overlay cleanup failed: {msg}", level=2)
+
+        self._run_background(_work, _on_result, _on_error)
+
+    def _run_post_close_hook_async(self):
+        cmd = self.opt_post_close_cmd.text() if hasattr(self, "opt_post_close_cmd") else ""
+        env_overrides = getattr(self, "_last_launch_env_overrides", {})
+        if not (cmd or "").strip():
+            return
+
+        def _work():
+            return self._run_shell_hook_blocking("Post-close", cmd, env_overrides)
+
+        def _on_result(logs):
+            self._emit_log_messages(logs)
+
+        def _on_error(msg):
+            self.log(f"Post-close hook failed: {msg}", level=2)
+
+        self._run_background(_work, _on_result, _on_error)
+
     @pyqtSlot()
     def start_scrcpy(self):
         if (
@@ -710,7 +1116,182 @@ class ScrcpyWrapper(
             self.log("scrcpy is already running.")
             return
 
-        args = self.build_scrcpy_args()
+        if getattr(self, "_launch_prepare_in_progress", False):
+            self.log("scrcpy launch is already being prepared.")
+            return
+
+        auto_detect_display = False
+        auto_detect_requested = False
+        new_display_enabled = False
+        use_adb_overlay_mode = False
+        adb_overlay_reset_on_close = False
+        overlay_spec = ""
+        launch_serial = None
+        pre_launch_cmd_text = ""
+        manual_overlay_create_cmd = False
+        try:
+            launch_serial = self.device_combo.currentData()
+        except Exception:
+            launch_serial = None
+
+        try:
+            new_display_enabled = (
+                hasattr(self, "opt_new_display")
+                and self.opt_new_display.isChecked()
+            )
+            use_adb_overlay_mode = (
+                new_display_enabled
+                and hasattr(self, "opt_new_display_mode_adb")
+                and self.opt_new_display_mode_adb.isChecked()
+            )
+            adb_overlay_reset_on_close = (
+                hasattr(self, "opt_adb_overlay_reset_on_close")
+                and self.opt_adb_overlay_reset_on_close.isChecked()
+            )
+            overlay_spec = (
+                self.opt_new_display_res.text().strip()
+                if hasattr(self, "opt_new_display_res")
+                else ""
+            )
+            pre_launch_cmd_text = (
+                self.opt_pre_launch_cmd.text().strip()
+                if hasattr(self, "opt_pre_launch_cmd")
+                else ""
+            )
+
+            lowered = pre_launch_cmd_text.lower()
+            manual_overlay_create_cmd = (
+                "settings put global" in lowered
+                and "overlay_display_devices" in lowered
+                and "overlay_display_devices none" not in lowered
+            )
+        except Exception:
+            new_display_enabled = False
+            use_adb_overlay_mode = False
+            adb_overlay_reset_on_close = False
+            overlay_spec = ""
+            pre_launch_cmd_text = ""
+            manual_overlay_create_cmd = False
+
+        try:
+            auto_detect_requested = (
+                hasattr(self, "opt_auto_virtual_display")
+                and self.opt_auto_virtual_display.isChecked()
+            )
+        except Exception:
+            auto_detect_requested = False
+
+        auto_detect_display = bool(
+            auto_detect_requested
+            and (new_display_enabled or manual_overlay_create_cmd)
+        )
+        if auto_detect_requested and not auto_detect_display:
+            self.log(
+                "Auto-detect display ID is enabled but inactive because New Display is off and no overlay-creation pre-launch command is set.",
+                level=1,
+            )
+
+        if use_adb_overlay_mode:
+            # ADB workaround mode has its own display detection workflow.
+            auto_detect_display = False
+
+        env_overrides: dict[str, str] = {}
+        try:
+            env_overrides = self._parse_env_vars(self.opt_env_vars.toPlainText())
+        except Exception:
+            env_overrides = {}
+
+        if launch_serial and "ANDROID_SERIAL" not in env_overrides:
+            env_overrides["ANDROID_SERIAL"] = str(launch_serial)
+            self.log(
+                f"Using selected device for hook commands via ANDROID_SERIAL={launch_serial}"
+            )
+
+        self._last_launch_env_overrides = dict(env_overrides)
+        self._last_launch_serial = launch_serial
+        self._adb_overlay_mode_active = False
+        self._adb_overlay_cleanup_on_close = bool(
+            adb_overlay_reset_on_close
+            and (use_adb_overlay_mode or manual_overlay_create_cmd)
+        )
+        if self._adb_overlay_cleanup_on_close:
+            self.log("Overlay cleanup on close is enabled (overlay_display_devices=none).")
+        if env_overrides:
+            self.log(
+                "Applying environment variables: "
+                + ", ".join(sorted(env_overrides.keys()))
+            )
+
+        prep_context = {
+            "pre_launch_cmd": self.opt_pre_launch_cmd.text() if hasattr(self, "opt_pre_launch_cmd") else "",
+            "env_overrides": dict(env_overrides),
+            "launch_serial": launch_serial,
+            "use_adb_overlay_mode": bool(use_adb_overlay_mode),
+            "adb_overlay_reset_on_close": bool(adb_overlay_reset_on_close),
+            "overlay_spec": overlay_spec,
+            "auto_detect_display": bool(auto_detect_display),
+            "cleanup_on_close_armed": bool(self._adb_overlay_cleanup_on_close),
+            "base_args": list(self.build_scrcpy_args()),
+        }
+
+        self._launch_prepare_in_progress = True
+        self.log("Preparing scrcpy launch...")
+        self.btn_start.setEnabled(False)
+        self.btn_stop.setEnabled(False)
+
+        def _work():
+            return self._prepare_launch_context_blocking(prep_context)
+
+        def _on_result(result):
+            self._launch_prepare_in_progress = False
+            self._emit_log_messages(result.get("logs", []))
+
+            if not result.get("ok"):
+                if result.get("request_cleanup"):
+                    self._cleanup_adb_overlay_if_needed_async()
+                self.btn_start.setEnabled(True)
+                self.btn_stop.setEnabled(False)
+                return
+
+            detected_display_id = result.get("detected_display_id")
+            args = list(prep_context.get("base_args", []))
+
+            if (
+                prep_context.get("use_adb_overlay_mode")
+                and detected_display_id is not None
+                and "--display-id" not in args
+            ):
+                args.extend(["--display-id", str(detected_display_id)])
+                self.opt_display_id.setValue(int(detected_display_id))
+                self._adb_overlay_mode_active = True
+                self._adb_overlay_cleanup_on_close = bool(
+                    prep_context.get("adb_overlay_reset_on_close")
+                )
+
+            if (
+                prep_context.get("auto_detect_display")
+                and detected_display_id is not None
+                and "--display-id" not in args
+            ):
+                args.extend(["--display-id", str(detected_display_id)])
+
+            self._start_scrcpy_process(args, prep_context.get("env_overrides", {}))
+
+        def _on_error(msg):
+            self._launch_prepare_in_progress = False
+            self.log(f"Launch preparation failed: {msg}", level=2)
+            self.btn_start.setEnabled(True)
+            self.btn_stop.setEnabled(False)
+            self._cleanup_adb_overlay_if_needed_async()
+
+        self._run_background(_work, _on_result, _on_error)
+
+    def _start_scrcpy_process(self, args, env_overrides):
+        if not args:
+            self.log("Unable to start scrcpy: command arguments are empty.", level=2)
+            self.btn_start.setEnabled(True)
+            self.btn_stop.setEnabled(False)
+            return
 
         self.scrcpy_process = QProcess(self)
         self.scrcpy_process.readyReadStandardOutput.connect(self.handle_stdout)
@@ -718,7 +1299,12 @@ class ScrcpyWrapper(
         self.scrcpy_process.finished.connect(self.process_finished)
         self.scrcpy_process.errorOccurred.connect(self.process_error)
 
-        # Execute Scrcpy
+        if env_overrides:
+            proc_env = QProcessEnvironment.systemEnvironment()
+            for key, value in env_overrides.items():
+                proc_env.insert(key, value)
+            self.scrcpy_process.setProcessEnvironment(proc_env)
+
         cmd = args[0]
         cmd_args = args[1:]
         self.log(f"-> EXECUTING: {cmd} {' '.join(cmd_args)}")
@@ -729,6 +1315,10 @@ class ScrcpyWrapper(
 
     @pyqtSlot()
     def stop_scrcpy(self):
+        if getattr(self, "_launch_prepare_in_progress", False):
+            self.log("Launch preparation is in progress.", level=1)
+            return
+
         if (
             self.scrcpy_process
             and self.scrcpy_process.state() != QProcess.ProcessState.NotRunning
@@ -760,11 +1350,28 @@ class ScrcpyWrapper(
         self.log(f"scrcpy exited with code {exit_code}.")
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
+        self._launch_prepare_in_progress = False
+
+        try:
+            self._cleanup_adb_overlay_if_needed_async()
+        except Exception:
+            pass
+
+        try:
+            self._run_post_close_hook_async()
+        except Exception:
+            pass
 
     def process_error(self, error):
         self.log(f"scrcpy process error: {error}")
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
+        self._launch_prepare_in_progress = False
+
+        try:
+            self._cleanup_adb_overlay_if_needed_async()
+        except Exception:
+            pass
 
     def on_filter_changed(self):
         # Refresh console view and persist filter settings

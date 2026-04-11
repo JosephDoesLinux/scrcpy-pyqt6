@@ -198,7 +198,7 @@ class SettingsTabs(QWidget):
         self.opt_video_source.addItems(["display (Default)", "camera"])
 
         self.opt_display_id = QSpinBox()
-        self.opt_display_id.setRange(0, 10)
+        self.opt_display_id.setRange(0, 99999)
         self.opt_display_id.setSpecialValueText("0 (Default)")
 
         self.opt_camera_facing = QComboBox()
