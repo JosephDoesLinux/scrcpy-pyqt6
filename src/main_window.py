@@ -311,37 +311,6 @@ class ScrcpyWrapper(
         dev_row3.addWidget(help_manual)
         device_layout.addLayout(dev_row3)
 
-        # Section: Recovery Actions
-        recovery_group = QGroupBox("Recovery")
-        recovery_layout = QVBoxLayout(recovery_group)
-        recovery_layout.setContentsMargins(12, 10, 12, 10)
-        recovery_layout.setSpacing(8)
-
-        self.btn_restart_systemui = QPushButton(" Emergency Restart SystemUI")
-        self.btn_restart_systemui.setFont(child_font)
-        recovery_icon = QIcon.fromTheme("process-stop")
-        if recovery_icon.isNull():
-            recovery_icon = self.style().standardIcon(
-                QStyle.StandardPixmap.SP_MessageBoxWarning
-            )
-        self.btn_restart_systemui.setIcon(recovery_icon)
-        self.btn_restart_systemui.setMinimumHeight(34)
-        self.btn_restart_systemui.setToolTip(
-            "Force-restart Android SystemUI on the selected device if the UI is frozen."
-        )
-        self.btn_restart_systemui.setEnabled(False)
-        self.btn_restart_systemui.clicked.connect(self.emergency_restart_systemui)
-        recovery_layout.addWidget(self.btn_restart_systemui)
-
-        recovery_hint = QLabel(
-            "Use only for frozen Android UI. Requires a selected connected device."
-        )
-        recovery_hint.setWordWrap(True)
-        recovery_hint.setFont(child_font)
-        recovery_layout.addWidget(recovery_hint)
-
-        device_layout.addWidget(recovery_group)
-
         # Small status label for network operations
         self.network_status = QLabel("")
         self.network_status.setFont(child_font)
@@ -358,17 +327,16 @@ class ScrcpyWrapper(
         self._recovery_cooldown_active = False
         self._recovery_cooldown_deadline = 0.0
         self._systemui_recovery_process = None
+        self._screen_off_process = None
+        self._screen_off_target_serial = None
+        self._screen_off_stop_requested = False
+        self._remove_virtual_displays_in_progress = False
 
         # Health check timer (attempt reconnects when Auto-connect is enabled)
         self.health_timer = QTimer(self)
         self.health_timer.setInterval(10_000)  # 10 seconds
         self.health_timer.timeout.connect(self.check_device_health)
         self.health_timer.start()
-
-        try:
-            self._update_recovery_controls()
-        except Exception:
-            pass
 
         # --- Responsive content container ---
         content_widget = QWidget()
@@ -475,12 +443,19 @@ class ScrcpyWrapper(
         self.tab_control = create_scroll_tab("Control & Behavior")
         self.tab_record = create_scroll_tab("Recording")
         self.tab_advanced = create_scroll_tab("Advanced Options")
+        self.tab_recovery = create_scroll_tab("Recovery & Actions")
 
         self.init_video_tab()
         self.init_audio_tab()
         self.init_control_tab()
         self.init_record_tab()
         self.init_advanced_tab()
+        self.init_recovery_tab()
+
+        try:
+            self._update_recovery_controls()
+        except Exception:
+            pass
 
         # add tabs into right column
         self.right_vlayout.addWidget(self.tabs)
@@ -599,6 +574,68 @@ class ScrcpyWrapper(
         scrcpy_label = QLabel(f'<a href="https://github.com/Genymobile/scrcpy">scrcpy</a>{ver_text}')
         scrcpy_label.setOpenExternalLinks(True)
         self.statusBar().addPermanentWidget(scrcpy_label)
+
+    def init_recovery_tab(self):
+        root = QVBoxLayout(self.tab_recovery)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        actions_group = QGroupBox("Device Recovery Actions")
+        actions_layout = QVBoxLayout(actions_group)
+        actions_layout.setContentsMargins(12, 12, 12, 12)
+        actions_layout.setSpacing(10)
+
+        self.btn_restart_systemui = QPushButton(" Emergency Restart SystemUI")
+        recovery_icon = QIcon.fromTheme("process-stop")
+        if recovery_icon.isNull():
+            recovery_icon = self.style().standardIcon(
+                QStyle.StandardPixmap.SP_MessageBoxWarning
+            )
+        self.btn_restart_systemui.setIcon(recovery_icon)
+        self.btn_restart_systemui.setMinimumHeight(36)
+        self.btn_restart_systemui.setToolTip(
+            "Force-restart Android SystemUI on the selected device if the UI is frozen."
+        )
+        self.btn_restart_systemui.setEnabled(False)
+        self.btn_restart_systemui.clicked.connect(self.emergency_restart_systemui)
+
+        self.btn_toggle_screen_power = QPushButton(" Turn Screen Off")
+        self.btn_toggle_screen_power.setCheckable(True)
+        self.btn_toggle_screen_power.setMinimumHeight(36)
+        self.btn_toggle_screen_power.setToolTip(
+            "Run scrcpy --no-window --turn-screen-off in a separate background session. "
+            "Click again to stop that session."
+        )
+        self.btn_toggle_screen_power.setEnabled(False)
+        self.btn_toggle_screen_power.toggled.connect(self.toggle_screen_power_action)
+
+        self.btn_remove_virtual_displays = QPushButton(" Remove Virtual Displays")
+        clear_icon = QIcon.fromTheme("edit-clear")
+        if clear_icon.isNull():
+            clear_icon = self.style().standardIcon(
+                QStyle.StandardPixmap.SP_DialogResetButton
+            )
+        self.btn_remove_virtual_displays.setIcon(clear_icon)
+        self.btn_remove_virtual_displays.setMinimumHeight(36)
+        self.btn_remove_virtual_displays.setToolTip(
+            "Set adb global setting overlay_display_devices to none on the selected device."
+        )
+        self.btn_remove_virtual_displays.setEnabled(False)
+        self.btn_remove_virtual_displays.clicked.connect(self.remove_virtual_displays)
+
+        actions_layout.addWidget(self.btn_restart_systemui)
+        actions_layout.addWidget(self.btn_toggle_screen_power)
+        actions_layout.addWidget(self.btn_remove_virtual_displays)
+
+        hint = QLabel(
+            "Actions target the selected connected device. "
+            "Screen-off toggle runs independently of the main Launch/Stop scrcpy session."
+        )
+        hint.setWordWrap(True)
+
+        root.addWidget(actions_group)
+        root.addWidget(hint)
+        root.addStretch(1)
 
     def changeEvent(self, event):
         super().changeEvent(event)

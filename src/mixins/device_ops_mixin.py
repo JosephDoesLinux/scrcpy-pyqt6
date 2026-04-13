@@ -1,5 +1,7 @@
 from PyQt6.QtWidgets import QInputDialog, QMessageBox
 from PyQt6.QtCore import pyqtSlot, QProcess, QTimer, QThreadPool
+import os
+import signal
 import time
 
 from adb import get_devices, get_mdns_services, connect_device, pair_device
@@ -43,22 +45,55 @@ class DeviceOpsMixin:
         except Exception:
             return None
 
-    def _update_recovery_controls(self):
-        if not hasattr(self, "btn_restart_systemui") or self.btn_restart_systemui is None:
-            return
+    def _screen_off_session_running(self) -> bool:
+        proc = getattr(self, "_screen_off_process", None)
+        return bool(proc and proc.state() != QProcess.ProcessState.NotRunning)
 
+    def _update_recovery_controls(self):
         has_serial = bool(self._get_selected_serial())
         is_running = bool(getattr(self, "_recovery_running", False))
         in_cooldown = bool(getattr(self, "_recovery_cooldown_active", False))
         enabled = has_serial and not is_running and not in_cooldown
-        self.btn_restart_systemui.setEnabled(enabled)
 
-        if is_running:
-            self.btn_restart_systemui.setText(" Restarting SystemUI...")
-        elif in_cooldown:
-            self.btn_restart_systemui.setText(" Emergency Restart SystemUI (Cooldown)")
-        else:
-            self.btn_restart_systemui.setText(" Emergency Restart SystemUI")
+        if hasattr(self, "btn_restart_systemui") and self.btn_restart_systemui is not None:
+            self.btn_restart_systemui.setEnabled(enabled)
+            if is_running:
+                self.btn_restart_systemui.setText(" Restarting SystemUI...")
+            elif in_cooldown:
+                self.btn_restart_systemui.setText(" Emergency Restart SystemUI (Cooldown)")
+            else:
+                self.btn_restart_systemui.setText(" Emergency Restart SystemUI")
+
+        screen_session_running = self._screen_off_session_running()
+        screen_stop_requested = bool(getattr(self, "_screen_off_stop_requested", False))
+        if hasattr(self, "btn_toggle_screen_power") and self.btn_toggle_screen_power is not None:
+            if screen_stop_requested:
+                can_toggle = False
+                checked = False
+            else:
+                can_toggle = screen_session_running or has_serial
+                checked = screen_session_running
+            self.btn_toggle_screen_power.setEnabled(can_toggle)
+            self.btn_toggle_screen_power.blockSignals(True)
+            self.btn_toggle_screen_power.setChecked(checked)
+            self.btn_toggle_screen_power.blockSignals(False)
+            if screen_stop_requested:
+                self.btn_toggle_screen_power.setText(" Stopping Screen-Off Session...")
+            elif screen_session_running:
+                self.btn_toggle_screen_power.setText(" Turn Screen On")
+            else:
+                self.btn_toggle_screen_power.setText(" Turn Screen Off")
+
+        remove_running = bool(getattr(self, "_remove_virtual_displays_in_progress", False))
+        if (
+            hasattr(self, "btn_remove_virtual_displays")
+            and self.btn_remove_virtual_displays is not None
+        ):
+            self.btn_remove_virtual_displays.setEnabled(has_serial and not remove_running)
+            if remove_running:
+                self.btn_remove_virtual_displays.setText(" Removing Virtual Displays...")
+            else:
+                self.btn_remove_virtual_displays.setText(" Remove Virtual Displays")
 
     def _begin_recovery_cooldown(self, seconds: int = 10):
         duration = max(1, int(seconds or 1))
@@ -131,6 +166,181 @@ class DeviceOpsMixin:
         proc.finished.connect(self._on_recovery_finished)
         proc.errorOccurred.connect(self._on_recovery_error)
         proc.start("adb", ["-s", serial, "shell", "sh", "-c", cmd])
+
+    @pyqtSlot(bool)
+    def toggle_screen_power_action(self, checked: bool):
+        if checked:
+            self._start_screen_off_session()
+        else:
+            self._stop_screen_off_session()
+
+    def _start_screen_off_session(self):
+        if self._screen_off_session_running():
+            self._update_recovery_controls()
+            return
+
+        serial = self._get_selected_serial()
+        if not serial:
+            self.log("Screen power toggle requires a selected connected device.", level=1)
+            self._update_recovery_controls()
+            return
+
+        self._screen_off_stop_requested = False
+        self._screen_off_target_serial = serial
+
+        proc = QProcess(self)
+        self._screen_off_process = proc
+        proc.readyReadStandardOutput.connect(self._on_screen_off_stdout)
+        proc.readyReadStandardError.connect(self._on_screen_off_stderr)
+        proc.finished.connect(self._on_screen_off_finished)
+        proc.errorOccurred.connect(self._on_screen_off_error)
+
+        args = ["-s", serial, "--no-window", "--turn-screen-off"]
+        self.log(
+            f"Recovery: starting independent screen-off session for {serial} "
+            "(scrcpy --no-window --turn-screen-off)."
+        )
+        self.network_status.setText(f"Recovery: turning screen off on {serial}...")
+        proc.start("scrcpy", args)
+        self._update_recovery_controls()
+
+    def _stop_screen_off_session(self):
+        proc = getattr(self, "_screen_off_process", None)
+        if not proc or proc.state() == QProcess.ProcessState.NotRunning:
+            self._screen_off_process = None
+            self._screen_off_target_serial = None
+            self._screen_off_stop_requested = False
+            self._update_recovery_controls()
+            return
+
+        serial = getattr(self, "_screen_off_target_serial", "selected device")
+        self._screen_off_stop_requested = True
+        self.log(
+            f"Recovery: stopping screen-off session for {serial} "
+            "(Ctrl+C style stop)."
+        )
+        self.network_status.setText(f"Recovery: stopping screen-off session for {serial}...")
+
+        sent_interrupt = False
+        try:
+            pid = int(proc.processId() or 0)
+            if pid > 0:
+                os.kill(pid, signal.SIGINT)
+                sent_interrupt = True
+        except Exception:
+            sent_interrupt = False
+
+        if not sent_interrupt:
+            proc.terminate()
+
+        QTimer.singleShot(1500, self._force_kill_screen_off_session)
+        self._update_recovery_controls()
+
+    def _force_kill_screen_off_session(self):
+        proc = getattr(self, "_screen_off_process", None)
+        if proc and proc.state() != QProcess.ProcessState.NotRunning:
+            proc.kill()
+
+    @pyqtSlot()
+    def remove_virtual_displays(self):
+        if getattr(self, "_remove_virtual_displays_in_progress", False):
+            return
+
+        serial = self._get_selected_serial()
+        if not serial:
+            self.log("Remove virtual displays requires a selected connected device.", level=1)
+            self._update_recovery_controls()
+            return
+
+        self._remove_virtual_displays_in_progress = True
+        self._update_recovery_controls()
+        self.log(f"Recovery: removing virtual displays on {serial}...")
+        self.network_status.setText(f"Recovery: removing virtual displays on {serial}...")
+
+        env_overrides = dict(getattr(self, "_last_launch_env_overrides", {}) or {})
+
+        def _work():
+            return self._run_adb_overlay_command_blocking("none", serial, env_overrides)
+
+        def _on_result(result):
+            self._emit_log_messages(result.get("logs", []))
+            if result.get("ok"):
+                self.log(f"Recovery: virtual displays removed for {serial}.")
+                self.network_status.setText(f"Recovery: virtual displays removed for {serial}.")
+                self._adb_overlay_mode_active = False
+                self._adb_overlay_cleanup_on_close = False
+            else:
+                self.log(f"Recovery: failed to remove virtual displays for {serial}.", level=1)
+                self.network_status.setText(
+                    f"Recovery: failed to remove virtual displays for {serial}."
+                )
+
+        def _on_error(msg):
+            self.log(f"Recovery remove virtual displays failed: {msg}", level=2)
+            self.network_status.setText(
+                f"Recovery: remove virtual displays failed for {serial}."
+            )
+
+        def _on_done():
+            self._remove_virtual_displays_in_progress = False
+            self._update_recovery_controls()
+
+        self._run_background(_work, _on_result, _on_error, _on_done)
+
+    def _on_screen_off_stdout(self):
+        proc = getattr(self, "_screen_off_process", None)
+        if not proc:
+            return
+
+        output = proc.readAllStandardOutput().data().decode("utf8", "replace")
+        for line in output.splitlines():
+            line = line.strip()
+            if line:
+                self.log(f"Screen-off stdout: {line}")
+
+    def _on_screen_off_stderr(self):
+        proc = getattr(self, "_screen_off_process", None)
+        if not proc:
+            return
+
+        output = proc.readAllStandardError().data().decode("utf8", "replace")
+        for line in output.splitlines():
+            line = line.strip()
+            if line:
+                self.log(f"Screen-off stderr: {line}", level=1)
+
+    def _on_screen_off_finished(self, exit_code, _exit_status):
+        serial = getattr(self, "_screen_off_target_serial", "selected device")
+        stop_requested = bool(getattr(self, "_screen_off_stop_requested", False))
+
+        self._screen_off_process = None
+        self._screen_off_target_serial = None
+        self._screen_off_stop_requested = False
+
+        if stop_requested:
+            self.log(f"Recovery: screen-off session stopped for {serial}.")
+            self.network_status.setText(f"Recovery: screen command stopped for {serial}.")
+        elif int(exit_code) == 0:
+            self.log(f"Recovery: screen-off session exited for {serial}.")
+            self.network_status.setText(f"Recovery: screen command exited for {serial}.")
+        else:
+            self.log(
+                f"Recovery: screen-off session exited with code {exit_code} for {serial}.",
+                level=1,
+            )
+            self.network_status.setText(
+                f"Recovery: screen command failed for {serial} (exit {exit_code})."
+            )
+
+        self._update_recovery_controls()
+
+    def _on_screen_off_error(self, error):
+        self._screen_off_process = None
+        self._screen_off_target_serial = None
+        self._screen_off_stop_requested = False
+        self.log(f"Recovery screen command error: {error}", level=2)
+        self.network_status.setText("Recovery: screen command failed to start.")
+        self._update_recovery_controls()
 
     def _on_recovery_stdout(self):
         proc = getattr(self, "_systemui_recovery_process", None)
