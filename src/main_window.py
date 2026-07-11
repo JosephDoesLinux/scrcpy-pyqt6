@@ -4,6 +4,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QPushButton,
+    QToolButton,
+    QMenu,
     QLabel,
     QComboBox,
     QLineEdit,
@@ -460,7 +462,7 @@ class ScrcpyWrapper(
         # add tabs into right column
         self.right_vlayout.addWidget(self.tabs)
 
-        # --- Launch Button ---
+        # --- Launch controls ---
         action_layout = QHBoxLayout()
         action_layout.setSpacing(10)
         # add bottom padding so buttons don't butt against the splitter handle
@@ -480,16 +482,36 @@ class ScrcpyWrapper(
         # We rely on the desktop's native GTK / KDE Plasma Qt engine to style this properly
         self.btn_start.clicked.connect(self.start_scrcpy)
 
+        self.btn_start_menu = QToolButton()
+        self.btn_start_menu.setMinimumHeight(40)
+        self.btn_start_menu.setArrowType(Qt.ArrowType.DownArrow)
+        self.btn_start_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_start_menu.setToolTip("More launch options")
+        self.launch_menu = QMenu(self.btn_start_menu)
+        self.action_launch_background = self.launch_menu.addAction("Launch in background")
+        self.action_launch_background.triggered.connect(
+            lambda: self.start_scrcpy(launch_in_background=True)
+        )
+        self.btn_start_menu.setMenu(self.launch_menu)
+
+        self.launch_split_widget = QWidget()
+        launch_split_layout = QHBoxLayout(self.launch_split_widget)
+        launch_split_layout.setContentsMargins(0, 0, 0, 0)
+        launch_split_layout.setSpacing(0)
+        launch_split_layout.addWidget(self.btn_start, 1)
+        launch_split_layout.addWidget(self.btn_start_menu)
+
         self.btn_stop = QPushButton(" Stop")
         self.btn_stop.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop)
         )
         self.btn_stop.setMinimumHeight(40)
         self.btn_stop.setFont(action_font)
+        self.btn_stop.setToolTip("Stop all running scrcpy sessions")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_scrcpy)
 
-        action_layout.addWidget(self.btn_start, stretch=3)
+        action_layout.addWidget(self.launch_split_widget, stretch=3)
         action_layout.addWidget(self.btn_stop, stretch=1)
         # add action buttons into right column
         action_widget = QWidget()
@@ -545,6 +567,10 @@ class ScrcpyWrapper(
         self.splitter.setSizes([600, 250])  # Give more space to controls
 
         self.scrcpy_process = None
+        self._scrcpy_processes = []
+        self._scrcpy_process_meta = {}
+        self._launch_prepare_in_progress = False
+        self._launch_prepare_cancelled = False
 
         # Load persisted UI settings (auto-connect and filters)
         try:
@@ -558,6 +584,8 @@ class ScrcpyWrapper(
         except Exception:
             # If loading fails, keep current defaults
             pass
+
+        self._sync_scrcpy_action_buttons()
 
         # Show scrcpy repo link + installed version in the status bar (permanent, right-aligned)
         try:
@@ -1103,14 +1131,28 @@ class ScrcpyWrapper(
         self._adb_overlay_cleanup_on_close = False
         self._adb_overlay_mode_active = False
 
-    def _cleanup_adb_overlay_if_needed_async(self):
-        if not getattr(self, "_adb_overlay_cleanup_on_close", False):
+    def _cleanup_adb_overlay_if_needed_async(
+        self,
+        force_cleanup: bool | None = None,
+        serial: str | None = None,
+        env_overrides: dict[str, str] | None = None,
+    ):
+        should_cleanup = bool(
+            getattr(self, "_adb_overlay_cleanup_on_close", False)
+            if force_cleanup is None
+            else force_cleanup
+        )
+        if not should_cleanup:
             return
 
-        serial = getattr(self, "_last_launch_serial", None)
-        env_overrides = getattr(self, "_last_launch_env_overrides", {})
-        self._adb_overlay_cleanup_on_close = False
-        self._adb_overlay_mode_active = False
+        if serial is None:
+            serial = getattr(self, "_last_launch_serial", None)
+        if env_overrides is None:
+            env_overrides = getattr(self, "_last_launch_env_overrides", {})
+
+        if force_cleanup is None:
+            self._adb_overlay_cleanup_on_close = False
+            self._adb_overlay_mode_active = False
 
         def _work():
             return self._run_adb_overlay_command_blocking("none", serial, env_overrides)
@@ -1127,9 +1169,19 @@ class ScrcpyWrapper(
 
         self._run_background(_work, _on_result, _on_error)
 
-    def _run_post_close_hook_async(self):
-        cmd = self.opt_post_close_cmd.text() if hasattr(self, "opt_post_close_cmd") else ""
-        env_overrides = getattr(self, "_last_launch_env_overrides", {})
+    def _run_post_close_hook_async(
+        self,
+        command: str | None = None,
+        env_overrides: dict[str, str] | None = None,
+    ):
+        if command is None:
+            cmd = self.opt_post_close_cmd.text() if hasattr(self, "opt_post_close_cmd") else ""
+        else:
+            cmd = command
+
+        if env_overrides is None:
+            env_overrides = getattr(self, "_last_launch_env_overrides", {})
+
         if not (cmd or "").strip():
             return
 
@@ -1144,17 +1196,66 @@ class ScrcpyWrapper(
 
         self._run_background(_work, _on_result, _on_error)
 
-    @pyqtSlot()
-    def start_scrcpy(self):
-        if (
-            self.scrcpy_process
-            and self.scrcpy_process.state() != QProcess.ProcessState.NotRunning
-        ):
-            self.log("scrcpy is already running.")
+    def _active_scrcpy_processes(self):
+        active = []
+        for proc in list(getattr(self, "_scrcpy_processes", [])):
+            if proc and proc.state() != QProcess.ProcessState.NotRunning:
+                active.append(proc)
+
+        self._scrcpy_processes = active
+        if self.scrcpy_process not in active:
+            self.scrcpy_process = active[-1] if active else None
+
+        stale = [proc for proc in list(self._scrcpy_process_meta.keys()) if proc not in active]
+        for proc in stale:
+            self._scrcpy_process_meta.pop(proc, None)
+
+        return active
+
+    def _sync_scrcpy_action_buttons(self):
+        preparing = bool(getattr(self, "_launch_prepare_in_progress", False))
+        has_active_sessions = bool(self._active_scrcpy_processes())
+
+        if hasattr(self, "btn_start") and self.btn_start is not None:
+            self.btn_start.setEnabled((not preparing) and (not has_active_sessions))
+
+        if hasattr(self, "btn_start_menu") and self.btn_start_menu is not None:
+            self.btn_start_menu.setEnabled(not preparing)
+
+        if hasattr(self, "btn_stop") and self.btn_stop is not None:
+            self.btn_stop.setEnabled(has_active_sessions)
+
+    def _describe_scrcpy_process(self, process, meta=None) -> str:
+        details = meta if meta is not None else self._scrcpy_process_meta.get(process, {})
+        mode = "background" if details.get("background") else "launch"
+        pid = 0
+        try:
+            pid = int(process.processId() or 0)
+        except Exception:
+            pid = 0
+
+        if pid > 0:
+            return f"[{mode} pid={pid}]"
+        return f"[{mode}]"
+
+    def _force_kill_scrcpy_process(self, process):
+        if process and process.state() != QProcess.ProcessState.NotRunning:
+            process.kill()
+
+    def start_scrcpy(self, launch_in_background: bool = False):
+        launch_in_background = bool(launch_in_background)
+
+        if not launch_in_background and self._active_scrcpy_processes():
+            self.log(
+                "scrcpy is already running. Use 'Launch in background' to start another session.",
+                level=1,
+            )
+            self._sync_scrcpy_action_buttons()
             return
 
         if getattr(self, "_launch_prepare_in_progress", False):
             self.log("scrcpy launch is already being prepared.")
+            self._sync_scrcpy_action_buttons()
             return
 
         auto_detect_display = False
@@ -1263,18 +1364,21 @@ class ScrcpyWrapper(
             "pre_launch_cmd": self.opt_pre_launch_cmd.text() if hasattr(self, "opt_pre_launch_cmd") else "",
             "env_overrides": dict(env_overrides),
             "launch_serial": launch_serial,
+            "launch_in_background": launch_in_background,
             "use_adb_overlay_mode": bool(use_adb_overlay_mode),
             "adb_overlay_reset_on_close": bool(adb_overlay_reset_on_close),
+            "cleanup_overlay_on_close": bool(self._adb_overlay_cleanup_on_close),
             "overlay_spec": overlay_spec,
             "auto_detect_display": bool(auto_detect_display),
             "cleanup_on_close_armed": bool(self._adb_overlay_cleanup_on_close),
+            "post_close_cmd": self.opt_post_close_cmd.text() if hasattr(self, "opt_post_close_cmd") else "",
             "base_args": list(self.build_scrcpy_args()),
         }
 
         self._launch_prepare_in_progress = True
+        self._launch_prepare_cancelled = False
         self.log("Preparing scrcpy launch...")
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(False)
+        self._sync_scrcpy_action_buttons()
 
         def _work():
             return self._prepare_launch_context_blocking(prep_context)
@@ -1283,11 +1387,26 @@ class ScrcpyWrapper(
             self._launch_prepare_in_progress = False
             self._emit_log_messages(result.get("logs", []))
 
+            if getattr(self, "_launch_prepare_cancelled", False):
+                self._launch_prepare_cancelled = False
+                self.log("Launch request was cancelled.", level=1)
+                if result.get("request_cleanup"):
+                    self._cleanup_adb_overlay_if_needed_async(
+                        force_cleanup=True,
+                        serial=prep_context.get("launch_serial"),
+                        env_overrides=prep_context.get("env_overrides", {}),
+                    )
+                self._sync_scrcpy_action_buttons()
+                return
+
             if not result.get("ok"):
                 if result.get("request_cleanup"):
-                    self._cleanup_adb_overlay_if_needed_async()
-                self.btn_start.setEnabled(True)
-                self.btn_stop.setEnabled(False)
+                    self._cleanup_adb_overlay_if_needed_async(
+                        force_cleanup=True,
+                        serial=prep_context.get("launch_serial"),
+                        env_overrides=prep_context.get("env_overrides", {}),
+                    )
+                self._sync_scrcpy_action_buttons()
                 return
 
             detected_display_id = result.get("detected_display_id")
@@ -1312,103 +1431,186 @@ class ScrcpyWrapper(
             ):
                 args.extend(["--display-id", str(detected_display_id)])
 
-            self._start_scrcpy_process(args, prep_context.get("env_overrides", {}))
+            self._start_scrcpy_process(
+                args,
+                prep_context.get("env_overrides", {}),
+                launch_in_background=bool(prep_context.get("launch_in_background")),
+                launch_serial=prep_context.get("launch_serial"),
+                cleanup_overlay_on_close=bool(prep_context.get("cleanup_overlay_on_close")),
+                post_close_cmd=prep_context.get("post_close_cmd", ""),
+            )
 
         def _on_error(msg):
             self._launch_prepare_in_progress = False
+            self._launch_prepare_cancelled = False
             self.log(f"Launch preparation failed: {msg}", level=2)
-            self.btn_start.setEnabled(True)
-            self.btn_stop.setEnabled(False)
-            self._cleanup_adb_overlay_if_needed_async()
+            self._sync_scrcpy_action_buttons()
+            self._cleanup_adb_overlay_if_needed_async(
+                force_cleanup=bool(prep_context.get("cleanup_overlay_on_close")),
+                serial=prep_context.get("launch_serial"),
+                env_overrides=prep_context.get("env_overrides", {}),
+            )
 
         self._run_background(_work, _on_result, _on_error)
 
-    def _start_scrcpy_process(self, args, env_overrides):
+    def _start_scrcpy_process(
+        self,
+        args,
+        env_overrides,
+        launch_in_background: bool = False,
+        launch_serial: str | None = None,
+        cleanup_overlay_on_close: bool = False,
+        post_close_cmd: str = "",
+    ):
         if not args:
             self.log("Unable to start scrcpy: command arguments are empty.", level=2)
-            self.btn_start.setEnabled(True)
-            self.btn_stop.setEnabled(False)
+            self._sync_scrcpy_action_buttons()
             return
 
-        self.scrcpy_process = QProcess(self)
-        self.scrcpy_process.readyReadStandardOutput.connect(self.handle_stdout)
-        self.scrcpy_process.readyReadStandardError.connect(self.handle_stderr)
-        self.scrcpy_process.finished.connect(self.process_finished)
-        self.scrcpy_process.errorOccurred.connect(self.process_error)
+        process = QProcess(self)
+        process.readyReadStandardOutput.connect(
+            lambda p=process: self.handle_stdout(p)
+        )
+        process.readyReadStandardError.connect(
+            lambda p=process: self.handle_stderr(p)
+        )
+        process.finished.connect(
+            lambda exit_code, exit_status, p=process: self.process_finished(
+                p, exit_code, exit_status
+            )
+        )
+        process.errorOccurred.connect(
+            lambda error, p=process: self.process_error(p, error)
+        )
 
         if env_overrides:
             proc_env = QProcessEnvironment.systemEnvironment()
             for key, value in env_overrides.items():
                 proc_env.insert(key, value)
-            self.scrcpy_process.setProcessEnvironment(proc_env)
+            process.setProcessEnvironment(proc_env)
 
         cmd = args[0]
         cmd_args = args[1:]
-        self.log(f"-> EXECUTING: {cmd} {' '.join(cmd_args)}")
+        mode_label = "BACKGROUND" if launch_in_background else "FOREGROUND"
+        self.log(f"-> EXECUTING ({mode_label}): {cmd} {' '.join(cmd_args)}")
 
-        self.scrcpy_process.start(cmd, cmd_args)
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
+        self.scrcpy_process = process
+        self._scrcpy_processes.append(process)
+        self._scrcpy_process_meta[process] = {
+            "background": bool(launch_in_background),
+            "launch_serial": launch_serial,
+            "env_overrides": dict(env_overrides or {}),
+            "cleanup_overlay_on_close": bool(cleanup_overlay_on_close),
+            "post_close_cmd": str(post_close_cmd or ""),
+        }
+
+        process.start(cmd, cmd_args)
+        self._sync_scrcpy_action_buttons()
 
     @pyqtSlot()
     def stop_scrcpy(self):
         if getattr(self, "_launch_prepare_in_progress", False):
-            self.log("Launch preparation is in progress.", level=1)
+            self._launch_prepare_cancelled = True
+
+        active = self._active_scrcpy_processes()
+        if not active and getattr(self, "_launch_prepare_in_progress", False):
+            self.log("Cancelling launch preparation...", level=1)
             return
 
-        if (
-            self.scrcpy_process
-            and self.scrcpy_process.state() != QProcess.ProcessState.NotRunning
-        ):
-            self.log("Terminating scrcpy process...")
-            self.scrcpy_process.terminate()
-            # fallback to kill if not dying?
-            # self.scrcpy_process.kill()
+        if not active:
+            self.log("No scrcpy sessions are currently running.", level=1)
+            self._sync_scrcpy_action_buttons()
+            return
 
-    @pyqtSlot()
-    def handle_stdout(self):
-        output = (
-            self.scrcpy_process.readAllStandardOutput().data().decode("utf8", "replace")
-        )
-        for line in output.split("\n"):
+        self.log(f"Terminating {len(active)} scrcpy session(s)...")
+        for process in active:
+            try:
+                process.terminate()
+                QTimer.singleShot(
+                    1500, lambda p=process: self._force_kill_scrcpy_process(p)
+                )
+            except Exception:
+                pass
+
+        self._sync_scrcpy_action_buttons()
+
+    def handle_stdout(self, process=None):
+        proc = process or self.sender()
+        if not proc:
+            return
+
+        output = proc.readAllStandardOutput().data().decode("utf8", "replace")
+        prefix = self._describe_scrcpy_process(proc)
+        for line in output.splitlines():
+            line = line.strip()
             if line:
-                self.log(line)
+                self.log(f"{prefix} {line}")
 
-    @pyqtSlot()
-    def handle_stderr(self):
-        output = (
-            self.scrcpy_process.readAllStandardError().data().decode("utf8", "replace")
-        )
-        for line in output.split("\n"):
+    def handle_stderr(self, process=None):
+        proc = process or self.sender()
+        if not proc:
+            return
+
+        output = proc.readAllStandardError().data().decode("utf8", "replace")
+        prefix = self._describe_scrcpy_process(proc)
+        for line in output.splitlines():
+            line = line.strip()
             if line:
-                self.log(f"ERROR: {line}")
+                self.log(f"{prefix} ERROR: {line}")
 
-    def process_finished(self, exit_code, exit_status):
-        self.log(f"scrcpy exited with code {exit_code}.")
-        self.btn_start.setEnabled(True)
-        self.btn_stop.setEnabled(False)
+    def process_finished(self, process, exit_code, exit_status):
+        meta = self._scrcpy_process_meta.pop(process, {})
+        self._scrcpy_processes = [p for p in self._scrcpy_processes if p is not process]
+        if self.scrcpy_process is process:
+            self.scrcpy_process = None
+
+        label = self._describe_scrcpy_process(process, meta)
+        self.log(f"{label} exited with code {exit_code}.")
         self._launch_prepare_in_progress = False
 
-        try:
-            self._cleanup_adb_overlay_if_needed_async()
-        except Exception:
-            pass
+        if meta.get("cleanup_overlay_on_close"):
+            try:
+                self._cleanup_adb_overlay_if_needed_async(
+                    force_cleanup=True,
+                    serial=meta.get("launch_serial"),
+                    env_overrides=meta.get("env_overrides", {}),
+                )
+            except Exception:
+                pass
 
-        try:
-            self._run_post_close_hook_async()
-        except Exception:
-            pass
+        post_close_cmd = meta.get("post_close_cmd", "")
+        if (post_close_cmd or "").strip():
+            try:
+                self._run_post_close_hook_async(
+                    command=post_close_cmd,
+                    env_overrides=meta.get("env_overrides", {}),
+                )
+            except Exception:
+                pass
 
-    def process_error(self, error):
-        self.log(f"scrcpy process error: {error}")
-        self.btn_start.setEnabled(True)
-        self.btn_stop.setEnabled(False)
+        self._sync_scrcpy_action_buttons()
+
+    def process_error(self, process, error):
+        meta = self._scrcpy_process_meta.pop(process, {})
+        self._scrcpy_processes = [p for p in self._scrcpy_processes if p is not process]
+        if self.scrcpy_process is process:
+            self.scrcpy_process = None
+
+        label = self._describe_scrcpy_process(process, meta)
+        self.log(f"{label} process error: {error}")
         self._launch_prepare_in_progress = False
 
-        try:
-            self._cleanup_adb_overlay_if_needed_async()
-        except Exception:
-            pass
+        if meta.get("cleanup_overlay_on_close"):
+            try:
+                self._cleanup_adb_overlay_if_needed_async(
+                    force_cleanup=True,
+                    serial=meta.get("launch_serial"),
+                    env_overrides=meta.get("env_overrides", {}),
+                )
+            except Exception:
+                pass
+
+        self._sync_scrcpy_action_buttons()
 
     def on_filter_changed(self):
         # Refresh console view and persist filter settings
